@@ -1,217 +1,345 @@
 <template>
   <div class="graph-container">
-    <div ref="networkContainer" class="network"></div>
+    <VueFlow
+      v-model:nodes="nodes"
+      v-model:edges="edges"
+      :default-zoom="1"
+      :min-zoom="0.1"
+      :max-zoom="4"
+      @node-click="onNodeClick"
+      @node-context-menu="onNodeContextMenu"
+      @pane-click="onPaneClick"
+      class="vue-flow-container"
+    >
+      <Background />
+      <Controls />
+      <MiniMap />
+      
+      <template #node-endpoint="{ data }">
+        <EndpointNode :data="data" />
+      </template>
+      
+      <template #node-service="{ data }">
+        <ServiceNode :data="data" />
+      </template>
+      
+      <template #node-repository="{ data }">
+        <RepositoryNode :data="data" />
+      </template>
+    </VueFlow>
+    
+    <!-- Context menu -->
+    <div
+      v-if="contextMenu.show"
+      class="context-menu"
+      :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
+    >
+      <div class="context-menu-item" @click="addAnnotation">
+        📝 Add Annotation
+      </div>
+      <div class="context-menu-item" @click="generateAnnotation">
+        ✨ Generate Annotation (AI)
+      </div>
+      <div class="context-menu-item" @click="selectConnected">
+        🔗 Select Connected Nodes
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
-import { Network } from 'vis-network/standalone'
+import { ref, watch, computed } from 'vue'
+import { VueFlow, useVueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import { MiniMap } from '@vue-flow/minimap'
 import { useAnalysisStore } from '../stores/analysisStore'
+import dagre from 'dagre'
+import EndpointNode from './nodes/EndpointNode.vue'
+import ServiceNode from './nodes/ServiceNode.vue'
+import RepositoryNode from './nodes/RepositoryNode.vue'
 
 const store = useAnalysisStore()
-const networkContainer = ref(null)
-let network = null
+const { fitView } = useVueFlow()
 
-// Network options
-const options = {
-  nodes: {
-    shape: 'box',
-    margin: 10,
-    font: {
-      size: 14,
-      face: 'monospace'
-    }
-  },
-  edges: {
-    arrows: {
-      to: {
-        enabled: true,
-        scaleFactor: 0.5
-      }
-    },
-    smooth: {
-      type: 'cubicBezier',
-      forceDirection: 'vertical'
-    },
-    color: {
-      color: '#848484',
-      highlight: '#2B7CE9',
-      hover: '#2B7CE9'
-    }
-  },
-  layout: {
-    hierarchical: {
-      enabled: true,
-      direction: 'UD',
-      sortMethod: 'directed',
-      levelSeparation: 150,
-      nodeSpacing: 200
-    }
-  },
-  physics: {
-    enabled: false
-  },
-  interaction: {
-    hover: true,
-    navigationButtons: true,
-    keyboard: true
+const nodes = ref([])
+const edges = ref([])
+const contextMenu = ref({ show: false, x: 0, y: 0, nodeId: null })
+
+// Watch for data changes
+watch(() => store.filteredData || store.analysisData, (data) => {
+  if (data) {
+    updateGraph(data)
   }
-}
+}, { deep: true, immediate: true })
 
-function initNetwork() {
-  if (!networkContainer.value) return
-
-  const data = prepareGraphData()
-  network = new Network(networkContainer.value, data, options)
-
-  // Handle node selection
-  network.on('click', (params) => {
-    if (params.nodes.length > 0) {
-      const nodeId = params.nodes[0]
-      const node = findNodeDetails(nodeId)
-      store.setSelectedNode(node)
-    } else {
-      store.setSelectedNode(null)
-    }
+// Watch for selected nodes changes
+watch(() => store.selectedNodes, (selected) => {
+  // Update node selection state
+  nodes.value.forEach(node => {
+    node.selected = selected.includes(node.id)
   })
+}, { deep: true })
 
-  // Handle double click to focus
-  network.on('doubleClick', (params) => {
-    if (params.nodes.length > 0) {
-      network.focus(params.nodes[0], {
-        scale: 1.5,
-        animation: true
-      })
-    }
-  })
-}
-
-function prepareGraphData() {
-  const filteredData = store.filteredData || store.analysisData
+function updateGraph(data) {
+  if (!data || !data.callGraph) return
   
-  if (!filteredData || !filteredData.callGraph) {
-    return { nodes: [], edges: [] }
-  }
-
-  // Prepare nodes with colors based on type
-  const nodes = filteredData.callGraph.nodes.map(node => ({
+  const graphNodes = data.callGraph.nodes.map(node => ({
     id: node.id,
-    label: node.label,
-    color: getNodeColor(node.type),
-    title: getNodeTooltip(node),
-    font: {
-      color: '#ffffff',
-      size: 12
+    type: node.type,
+    position: { x: 0, y: 0 }, // Will be set by layout
+    data: {
+      ...node,
+      label: node.label,
+      hasAnnotation: store.hasNodeAnnotation(node.id),
+      annotation: store.getNodeAnnotation(node.id)
+    },
+    selected: store.selectedNodes.includes(node.id)
+  }))
+  
+  const graphEdges = data.callGraph.edges.map((edge, index) => ({
+    id: edge.id || `edge-${index}`,
+    source: edge.from,
+    target: edge.to,
+    label: edge.label || '',
+    type: 'smoothstep',
+    animated: store.selectedNodes.includes(edge.from) && store.selectedNodes.includes(edge.to),
+    style: {
+      stroke: getEdgeColor(edge.type),
+      strokeWidth: 2
+    },
+    markerEnd: {
+      type: 'arrowclosed',
+      color: getEdgeColor(edge.type)
     }
   }))
-
-  // Prepare edges
-  const edges = filteredData.callGraph.edges.map((edge, index) => ({
-    id: `edge-${index}`,
-    from: edge.from,
-    to: edge.to,
-    label: edge.label || '',
-    title: edge.type
-  }))
-
-  return { nodes, edges }
+  
+  // Apply dagre layout
+  const layouted = getLayoutedElements(graphNodes, graphEdges)
+  
+  nodes.value = layouted.nodes
+  edges.value = layouted.edges
+  
+  // Fit view after layout
+  setTimeout(() => {
+    fitView({ padding: 0.2, duration: 400 })
+  }, 100)
 }
 
-function getNodeColor(type) {
+function getLayoutedElements(nodes, edges) {
+  const g = new dagre.graphlib.Graph()
+  g.setDefaultEdgeLabel(() => ({}))
+  g.setGraph({ 
+    rankdir: 'TB',
+    ranksep: 100,
+    nodesep: 80,
+    edgesep: 40
+  })
+  
+  // Add nodes
+  nodes.forEach(node => {
+    const width = node.type === 'endpoint' ? 280 : 240
+    const height = 80
+    g.setNode(node.id, { width, height })
+  })
+  
+  // Add edges
+  edges.forEach(edge => {
+    g.setEdge(edge.source, edge.target)
+  })
+  
+  // Calculate layout
+  dagre.layout(g)
+  
+  // Apply positions
+  const layoutedNodes = nodes.map(node => {
+    const position = g.node(node.id)
+    return {
+      ...node,
+      position: {
+        x: position.x - position.width / 2,
+        y: position.y - position.height / 2
+      }
+    }
+  })
+  
+  return { nodes: layoutedNodes, edges }
+}
+
+function getEdgeColor(type) {
   switch (type) {
-    case 'endpoint':
-      return {
-        background: '#2ecc71',
-        border: '#27ae60',
-        highlight: { background: '#27ae60', border: '#229954' }
-      }
-    case 'service':
-      return {
-        background: '#3498db',
-        border: '#2980b9',
-        highlight: { background: '#2980b9', border: '#21618c' }
-      }
-    case 'repository':
-      return {
-        background: '#e74c3c',
-        border: '#c0392b',
-        highlight: { background: '#c0392b', border: '#a93226' }
-      }
-    default:
-      return {
-        background: '#95a5a6',
-        border: '#7f8c8d',
-        highlight: { background: '#7f8c8d', border: '#626567' }
-      }
+    case 'method_call': return '#3498db'
+    case 'dependency_injection': return '#9b59b6'
+    default: return '#95a5a6'
   }
 }
 
-function getNodeTooltip(node) {
-  return `${node.type.toUpperCase()}\n${node.className || ''}.${node.methodName || ''}`
+function onNodeClick(event) {
+  const nodeId = event.node.id
+  
+  // Handle multi-select with Shift key
+  if (event.event.shiftKey) {
+    store.toggleNodeSelection(nodeId)
+  } else {
+    // Single select
+    store.setSelectedNodes([nodeId])
+  }
+  
+  // Find full node details
+  const allData = store.analysisData || store.filteredData
+  const node = findNodeById(nodeId, allData)
+  if (node) {
+    store.setSelectedNode(node)
+  }
 }
 
-function findNodeDetails(nodeId) {
-  const data = store.filteredData || store.analysisData
+function onNodeContextMenu(event) {
+  event.event.preventDefault()
+  contextMenu.value = {
+    show: true,
+    x: event.event.clientX,
+    y: event.event.clientY,
+    nodeId: event.node.id
+  }
+}
+
+function onPaneClick() {
+  contextMenu.value.show = false
+  if (!event.shiftKey) {
+    store.setSelectedNodes([])
+    store.setSelectedNode(null)
+  }
+}
+
+function findNodeById(nodeId, data) {
   if (!data) return null
-
-  // Check endpoints
-  const endpoint = data.endpoints.find(e => e.id === nodeId)
-  if (endpoint) return { ...endpoint, type: 'endpoint' }
-
-  // Check services
-  const service = data.services.find(s => s.id === nodeId)
-  if (service) return { ...service, type: 'service' }
-
-  // Check repositories
-  const repo = data.repositories.find(r => r.id === nodeId)
-  if (repo) return { ...repo, type: 'repository' }
-
+  
+  let found = data.endpoints?.find(e => e.id === nodeId)
+  if (found) return { ...found, type: 'endpoint' }
+  
+  found = data.services?.find(s => s.id === nodeId)
+  if (found) return { ...found, type: 'service' }
+  
+  found = data.repositories?.find(r => r.id === nodeId)
+  if (found) return { ...found, type: 'repository' }
+  
   return null
 }
 
-function updateGraph() {
-  if (network) {
-    const data = prepareGraphData()
-    network.setData(data)
-    network.fit()
+function addAnnotation() {
+  // Emit event to show annotation dialog
+  const node = findNodeById(contextMenu.value.nodeId, store.analysisData)
+  if (node) {
+    store.setSelectedNode(node)
+    // The NodeDetails component will handle showing the annotation form
   }
+  contextMenu.value.show = false
 }
 
-// Watch for data changes
-watch(() => store.filteredData, () => {
-  updateGraph()
-}, { deep: true })
-
-watch(() => store.analysisData, () => {
-  if (store.analysisData && network) {
-    updateGraph()
+async function generateAnnotation() {
+  const node = findNodeById(contextMenu.value.nodeId, store.analysisData)
+  if (node) {
+    // This will be implemented when LLM panel is created
+    console.log('Generate annotation for', node)
   }
-})
+  contextMenu.value.show = false
+}
 
-onMounted(() => {
-  initNetwork()
-})
+function selectConnected() {
+  const nodeId = contextMenu.value.nodeId
+  const connected = new Set([nodeId])
+  
+  // Find all connected nodes
+  edges.value.forEach(edge => {
+    if (edge.source === nodeId) {
+      connected.add(edge.target)
+    }
+    if (edge.target === nodeId) {
+      connected.add(edge.source)
+    }
+  })
+  
+  store.setSelectedNodes(Array.from(connected))
+  contextMenu.value.show = false
+}
 
-onUnmounted(() => {
-  if (network) {
-    network.destroy()
-    network = null
+// Close context menu on click outside
+document.addEventListener('click', () => {
+  if (contextMenu.value.show) {
+    contextMenu.value.show = false
   }
 })
 </script>
+
+<style>
+@import '@vue-flow/core/dist/style.css';
+@import '@vue-flow/core/dist/theme-default.css';
+@import '@vue-flow/controls/dist/style.css';
+@import '@vue-flow/minimap/dist/style.css';
+</style>
 
 <style scoped>
 .graph-container {
   width: 100%;
   height: 100%;
-  background-color: #f5f5f5;
-  border-radius: 8px;
-  overflow: hidden;
+  position: relative;
+  background-color: #f8f9fa;
 }
 
-.network {
+.vue-flow-container {
   width: 100%;
   height: 100%;
+}
+
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 200px;
+}
+
+.context-menu-item {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-size: 0.9rem;
+}
+
+.context-menu-item:hover {
+  background-color: #f0f0f0;
+}
+
+.context-menu-item:first-child {
+  border-radius: 6px 6px 0 0;
+}
+
+.context-menu-item:last-child {
+  border-radius: 0 0 6px 6px;
+}
+
+:deep(.vue-flow__node) {
+  cursor: pointer;
+}
+
+:deep(.vue-flow__node.selected) {
+  box-shadow: 0 0 0 3px #3498db;
+}
+
+:deep(.vue-flow__edge.selected) {
+  z-index: 1000;
+}
+
+:deep(.vue-flow__edge.animated path) {
+  stroke-dasharray: 5;
+  animation: dashdraw 0.5s linear infinite;
+}
+
+@keyframes dashdraw {
+  to {
+    stroke-dashoffset: -10;
+  }
 }
 </style>

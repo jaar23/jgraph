@@ -176,9 +176,9 @@ function handleFileUpload(event) {
 }
 
 .loaded-info-compact {
-  padding: 0.5rem 1rem;
+  padding: 0.75rem 1.5rem;
   background-color: #f8f9fa;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 2px solid #e0e0e0;
 }
 
 .compact-header {

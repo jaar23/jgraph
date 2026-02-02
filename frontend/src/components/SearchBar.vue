@@ -240,7 +240,9 @@ function isSelected(id) {
 
 function updateFilter() {
   if (selectedItems.value.length === 0) {
-    store.setSearchKeyword('')
+    // Clear selection and show all nodes
+    store.setSelectedNodes([])
+    store.filteredData = null
     return
   }
   
@@ -257,26 +259,34 @@ function updateFilter() {
   
   // Add connected services from endpoints
   filteredEndpoints.forEach(endpoint => {
-    endpoint.callChain.forEach(call => {
-      store.services.forEach(service => {
-        if (call.includes(service.methodName) || call.includes(service.className)) {
-          allNodeIds.add(service.id)
-          filteredServices.push(service)
-        }
+    if (endpoint.callChain) {
+      endpoint.callChain.forEach(call => {
+        store.services.forEach(service => {
+          if (call.includes(service.methodName) || call.includes(service.className)) {
+            allNodeIds.add(service.id)
+            if (!filteredServices.find(s => s.id === service.id)) {
+              filteredServices.push(service)
+            }
+          }
+        })
       })
-    })
+    }
   })
   
   // Add connected repositories from services
   filteredServices.forEach(service => {
-    service.calls.forEach(call => {
-      store.repositories.forEach(repo => {
-        if (call.includes(repo.methodName) || call.includes(repo.className)) {
-          allNodeIds.add(repo.id)
-          filteredRepositories.push(repo)
-        }
+    if (service.calls) {
+      service.calls.forEach(call => {
+        store.repositories.forEach(repo => {
+          if (call.includes(repo.methodName) || call.includes(repo.className)) {
+            allNodeIds.add(repo.id)
+            if (!filteredRepositories.find(r => r.id === repo.id)) {
+              filteredRepositories.push(repo)
+            }
+          }
+        })
       })
-    })
+    }
   })
   
   // Filter call graph
@@ -285,16 +295,20 @@ function updateFilter() {
     allNodeIds.has(edge.from) && allNodeIds.has(edge.to)
   )
   
+  // Set filtered data for the graph to render
   store.filteredData = {
     ...store.analysisData,
-    endpoints: [...new Set(filteredEndpoints)],
-    services: [...new Set(filteredServices)],
-    repositories: [...new Set(filteredRepositories)],
+    endpoints: filteredEndpoints,
+    services: filteredServices,
+    repositories: filteredRepositories,
     callGraph: {
       nodes: filteredNodes,
       edges: filteredEdges
     }
   }
+  
+  // Also update selected nodes for highlighting in Vue Flow
+  store.setSelectedNodes(Array.from(allNodeIds))
 }
 
 function getItemIndex(type, index) {

@@ -2,11 +2,58 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 export const useAnalysisStore = defineStore('analysis', () => {
-  // State
+  // Original analysis data
   const analysisData = ref(null)
   const searchKeyword = ref('')
   const selectedNode = ref(null)
   const filteredData = ref(null)
+  
+  // User annotations
+  const nodeAnnotations = ref(new Map())
+  const edgeAnnotations = ref(new Map())
+  
+  // LLM features
+  const llmConfig = ref({
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4-turbo-preview',
+    apiKey: '',
+    temperature: 0.3,
+    maxTokens: 2000,
+    systemPrompt: `You are an expert Java software architect specializing in Spring Boot and Jakarta EE applications. 
+You analyze code flows, identify issues, and provide actionable solutions.
+
+Your responses should:
+1. Be concise and specific
+2. Reference exact classes and methods
+3. Include code snippets when suggesting fixes
+4. Consider Spring/Jakarta EE best practices
+5. Explain the reasoning behind your analysis`,
+    userPromptTemplate: `Analyze this Java code flow issue:
+
+Error Message:
+{errorMessage}
+
+Call Path:
+{callPath}
+
+Components Involved:
+{componentDetails}
+
+Please provide:
+1. Root Cause Analysis
+2. Problematic Component (specify which node)
+3. Recommended Fix
+4. Prevention Tips`
+  })
+  
+  const llmAnalyses = ref([])
+  const chatHistory = ref([])
+  const currentChatSession = ref(null)
+  
+  // UI state
+  const selectedNodes = ref([])
+  const unsavedChanges = ref(false)
+  const lastExportTimestamp = ref(null)
 
   // Computed
   const hasData = computed(() => analysisData.value !== null)
@@ -17,10 +64,17 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const callGraph = computed(() => analysisData.value?.callGraph || { nodes: [], edges: [] })
   const statistics = computed(() => analysisData.value?.statistics || {})
 
+  const hasUnsavedChanges = computed(() => unsavedChanges.value)
+
   // Actions
   function loadAnalysisData(data) {
     analysisData.value = data
     filteredData.value = data
+    
+    // Load user annotations if present in data
+    if (data.userAnnotations) {
+      loadUserAnnotations(data.userAnnotations)
+    }
   }
 
   function clearData() {
@@ -28,6 +82,12 @@ export const useAnalysisStore = defineStore('analysis', () => {
     filteredData.value = null
     searchKeyword.value = ''
     selectedNode.value = null
+    nodeAnnotations.value.clear()
+    edgeAnnotations.value.clear()
+    llmAnalyses.value = []
+    chatHistory.value = []
+    selectedNodes.value = []
+    unsavedChanges.value = false
   }
 
   function setSearchKeyword(keyword) {
@@ -38,6 +98,19 @@ export const useAnalysisStore = defineStore('analysis', () => {
   function setSelectedNode(node) {
     selectedNode.value = node
   }
+  
+  function setSelectedNodes(nodes) {
+    selectedNodes.value = nodes
+  }
+  
+  function toggleNodeSelection(nodeId) {
+    const index = selectedNodes.value.indexOf(nodeId)
+    if (index >= 0) {
+      selectedNodes.value.splice(index, 1)
+    } else {
+      selectedNodes.value.push(nodeId)
+    }
+  }
 
   function filterData() {
     if (!analysisData.value || !searchKeyword.value) {
@@ -47,32 +120,26 @@ export const useAnalysisStore = defineStore('analysis', () => {
 
     const keyword = searchKeyword.value
 
-    // Filter endpoints
     const filteredEndpoints = endpoints.value.filter(endpoint => 
       matchesKeyword(endpoint, keyword)
     )
 
-    // Filter services
     const filteredServices = services.value.filter(service => 
       matchesKeyword(service, keyword)
     )
 
-    // Filter repositories
     const filteredRepositories = repositories.value.filter(repo => 
       matchesKeyword(repo, keyword)
     )
 
-    // Build filtered node IDs
     const filteredNodeIds = new Set([
       ...filteredEndpoints.map(e => e.id),
       ...filteredServices.map(s => s.id),
       ...filteredRepositories.map(r => r.id)
     ])
 
-    // Include connected nodes (expand search to call chains)
     filteredEndpoints.forEach(endpoint => {
       endpoint.callChain.forEach(call => {
-        // Find matching service/repo
         services.value.forEach(service => {
           if (call.includes(service.methodName) || call.includes(service.className)) {
             filteredNodeIds.add(service.id)
@@ -91,7 +158,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
       })
     })
 
-    // Filter call graph
     const filteredNodes = callGraph.value.nodes.filter(node => 
       filteredNodeIds.has(node.id)
     )
@@ -132,12 +198,238 @@ export const useAnalysisStore = defineStore('analysis', () => {
     )
   }
 
+  // Annotation management
+  function addNodeAnnotation(nodeId, annotation) {
+    const existing = nodeAnnotations.value.get(nodeId) || { notes: [], tags: [], customFields: {} }
+    
+    if (annotation.note) {
+      existing.notes.push({
+        id: `note-${Date.now()}`,
+        text: annotation.note,
+        createdAt: new Date().toISOString(),
+        severity: annotation.severity || 'info'
+      })
+    }
+    
+    if (annotation.tags) {
+      existing.tags = [...new Set([...existing.tags, ...annotation.tags])]
+    }
+    
+    if (annotation.customFields) {
+      existing.customFields = { ...existing.customFields, ...annotation.customFields }
+    }
+    
+    nodeAnnotations.value.set(nodeId, existing)
+    unsavedChanges.value = true
+  }
+  
+  function removeNodeAnnotation(nodeId, noteId) {
+    const existing = nodeAnnotations.value.get(nodeId)
+    if (existing) {
+      existing.notes = existing.notes.filter(n => n.id !== noteId)
+      if (existing.notes.length === 0 && existing.tags.length === 0) {
+        nodeAnnotations.value.delete(nodeId)
+      }
+      unsavedChanges.value = true
+    }
+  }
+  
+  function updateNodeAnnotation(nodeId, noteId, updates) {
+    const existing = nodeAnnotations.value.get(nodeId)
+    if (existing) {
+      const note = existing.notes.find(n => n.id === noteId)
+      if (note) {
+        Object.assign(note, updates)
+        unsavedChanges.value = true
+      }
+    }
+  }
+  
+  function getNodeAnnotation(nodeId) {
+    return nodeAnnotations.value.get(nodeId) || { notes: [], tags: [], customFields: {} }
+  }
+  
+  function hasNodeAnnotation(nodeId) {
+    const ann = nodeAnnotations.value.get(nodeId)
+    return ann && (ann.notes.length > 0 || ann.tags.length > 0)
+  }
+
+  // LLM management
+  function updateLLMConfig(config) {
+    llmConfig.value = { ...llmConfig.value, ...config }
+    // Don't mark as unsaved for config changes
+  }
+  
+  function addLLMAnalysis(analysis) {
+    llmAnalyses.value.push({
+      id: `analysis-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      ...analysis
+    })
+    unsavedChanges.value = true
+  }
+  
+  function startChatSession(context) {
+    currentChatSession.value = {
+      id: `chat-${Date.now()}`,
+      startedAt: new Date().toISOString(),
+      context: context || selectedNodes.value,
+      messages: []
+    }
+  }
+  
+  function addChatMessage(message) {
+    if (currentChatSession.value) {
+      currentChatSession.value.messages.push({
+        ...message,
+        timestamp: new Date().toISOString()
+      })
+      unsavedChanges.value = true
+    }
+  }
+  
+  function endChatSession() {
+    if (currentChatSession.value) {
+      chatHistory.value.push(currentChatSession.value)
+      currentChatSession.value = null
+    }
+  }
+
+  // Export functionality
+  function getExportData(options = {}) {
+    const {
+      includeAnnotations = true,
+      includeLLMInsights = true,
+      includeChatHistory = false,
+      selectedNodesOnly = false
+    } = options
+
+    let exportData = {
+      ...analysisData.value
+    }
+
+    // Build user annotations section
+    const userAnnotations = {
+      version: '1.0',
+      createdAt: analysisData.value?.project?.analyzedAt || new Date().toISOString(),
+      lastModified: new Date().toISOString()
+    }
+
+    if (includeAnnotations) {
+      const nodeAnnotationsObj = {}
+      nodeAnnotations.value.forEach((value, key) => {
+        if (!selectedNodesOnly || selectedNodes.value.includes(key)) {
+          nodeAnnotationsObj[key] = value
+        }
+      })
+      userAnnotations.nodeAnnotations = nodeAnnotationsObj
+      
+      const edgeAnnotationsObj = {}
+      edgeAnnotations.value.forEach((value, key) => {
+        edgeAnnotationsObj[key] = value
+      })
+      userAnnotations.edgeAnnotations = edgeAnnotationsObj
+    }
+
+    if (includeLLMInsights) {
+      userAnnotations.llmInsights = {
+        analyses: llmAnalyses.value.filter(a => 
+          !selectedNodesOnly || a.selectedNodes.some(n => selectedNodes.value.includes(n))
+        )
+      }
+      
+      if (includeChatHistory) {
+        userAnnotations.llmInsights.chatHistory = chatHistory.value
+      }
+    }
+
+    userAnnotations.metadata = {
+      appVersion: '1.0.0',
+      exportedAt: new Date().toISOString()
+    }
+
+    exportData.userAnnotations = userAnnotations
+
+    // Filter by selected nodes if requested
+    if (selectedNodesOnly && selectedNodes.value.length > 0) {
+      const selectedSet = new Set(selectedNodes.value)
+      exportData.endpoints = exportData.endpoints.filter(e => selectedSet.has(e.id))
+      exportData.services = exportData.services.filter(s => selectedSet.has(s.id))
+      exportData.repositories = exportData.repositories.filter(r => selectedSet.has(r.id))
+      exportData.callGraph.nodes = exportData.callGraph.nodes.filter(n => selectedSet.has(n.id))
+      exportData.callGraph.edges = exportData.callGraph.edges.filter(e => 
+        selectedSet.has(e.from) && selectedSet.has(e.to)
+      )
+    }
+
+    return exportData
+  }
+
+  function exportToJSON(options = {}) {
+    const data = getExportData(options)
+    const jsonString = JSON.stringify(data, null, 2)
+    const blob = new Blob([jsonString], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    
+    const projectName = data.project?.name || 'analysis'
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)
+    const filename = `${projectName}-enhanced-${timestamp}.json`
+    
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    
+    URL.revokeObjectURL(url)
+    
+    lastExportTimestamp.value = new Date().toISOString()
+    unsavedChanges.value = false
+    
+    return filename
+  }
+
+  function loadUserAnnotations(userAnnotations) {
+    // Load node annotations
+    if (userAnnotations.nodeAnnotations) {
+      nodeAnnotations.value.clear()
+      Object.entries(userAnnotations.nodeAnnotations).forEach(([key, value]) => {
+        nodeAnnotations.value.set(key, value)
+      })
+    }
+    
+    // Load edge annotations
+    if (userAnnotations.edgeAnnotations) {
+      edgeAnnotations.value.clear()
+      Object.entries(userAnnotations.edgeAnnotations).forEach(([key, value]) => {
+        edgeAnnotations.value.set(key, value)
+      })
+    }
+    
+    // Load LLM insights
+    if (userAnnotations.llmInsights) {
+      llmAnalyses.value = userAnnotations.llmInsights.analyses || []
+      chatHistory.value = userAnnotations.llmInsights.chatHistory || []
+    }
+    
+    unsavedChanges.value = false
+  }
+
   return {
     // State
     analysisData,
     searchKeyword,
     selectedNode,
     filteredData,
+    selectedNodes,
+    nodeAnnotations,
+    edgeAnnotations,
+    llmConfig,
+    llmAnalyses,
+    chatHistory,
+    currentChatSession,
+    unsavedChanges,
+    lastExportTimestamp,
+    
     // Computed
     hasData,
     endpoints,
@@ -145,10 +437,32 @@ export const useAnalysisStore = defineStore('analysis', () => {
     repositories,
     callGraph,
     statistics,
+    hasUnsavedChanges,
+    
     // Actions
     loadAnalysisData,
     clearData,
     setSearchKeyword,
-    setSelectedNode
+    setSelectedNode,
+    setSelectedNodes,
+    toggleNodeSelection,
+    
+    // Annotations
+    addNodeAnnotation,
+    removeNodeAnnotation,
+    updateNodeAnnotation,
+    getNodeAnnotation,
+    hasNodeAnnotation,
+    
+    // LLM
+    updateLLMConfig,
+    addLLMAnalysis,
+    startChatSession,
+    addChatMessage,
+    endChatSession,
+    
+    // Export
+    getExportData,
+    exportToJSON
   }
 })
