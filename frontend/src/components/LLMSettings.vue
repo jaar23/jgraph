@@ -134,38 +134,9 @@ function save() {
 }
 
 function reset() {
-  config.value = {
-    endpoint: 'https://api.openai.com/v1/chat/completions',
-    model: 'gpt-4-turbo-preview',
-    apiKey: '',
-    temperature: 0.3,
-    maxTokens: 2000,
-    systemPrompt: `You are an expert Java software architect specializing in Spring Boot and Jakarta EE applications. 
-You analyze code flows, identify issues, and provide actionable solutions.
-
-Your responses should:
-1. Be concise and specific
-2. Reference exact classes and methods
-3. Include code snippets when suggesting fixes
-4. Consider Spring/Jakarta EE best practices
-5. Explain the reasoning behind your analysis`,
-    userPromptTemplate: `Analyze this Java code flow issue:
-
-Error Message:
-{errorMessage}
-
-Call Path:
-{callPath}
-
-Components Involved:
-{componentDetails}
-
-Please provide:
-1. Root Cause Analysis
-2. Problematic Component (specify which node)
-3. Recommended Fix
-4. Prevention Tips`
-  }
+  store.resetLLMConfig()
+  config.value = { ...store.llmConfig }
+  testResult.value = null
 }
 
 async function testConnection() {

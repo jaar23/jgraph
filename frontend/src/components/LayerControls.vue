@@ -63,16 +63,15 @@
         <span class="layer-count">{{ counts.external }}</span>
       </label>
       
-      <label class="layer-option" :class="{ disabled: true }">
+      <label class="layer-option">
         <input 
           type="checkbox" 
           v-model="layers.dataflow" 
           @change="emitChange"
-          disabled
         />
         <span class="layer-icon">📊</span>
         <span class="layer-name">Data Flow</span>
-        <span class="layer-count coming-soon">(Coming Soon)</span>
+        <span class="layer-count">{{ counts.dataflow }}</span>
       </label>
     </div>
     
@@ -119,14 +118,15 @@ const emit = defineEmits(['change'])
 
 const counts = computed(() => {
   const data = store.analysisData
-  if (!data) return { methods: 0, logs: 0, exceptions: 0, database: 0, external: 0 }
+  if (!data) return { methods: 0, logs: 0, exceptions: 0, database: 0, external: 0, dataflow: 0 }
   
   return {
     methods: (data.endpoints?.length || 0) + (data.services?.length || 0) + (data.repositories?.length || 0),
     logs: data.logStatements?.length || 0,
     exceptions: (data.tryCatchBlocks?.length || 0) + (data.exceptionHandlers?.length || 0),
     database: (data.databaseOperations?.length || 0) + (data.transactions?.length || 0),
-    external: data.externalCalls?.length || 0
+    external: data.externalCalls?.length || 0,
+    dataflow: data.dataFlows?.length || 0
   }
 })
 
@@ -138,7 +138,7 @@ const logLevelCounts = computed(() => {
 
 const allEnabled = computed(() => {
   return layers.value.methods && layers.value.logs && layers.value.exceptions && 
-         layers.value.database && layers.value.external
+         layers.value.database && layers.value.external && layers.value.dataflow
 })
 
 function toggleAll() {
@@ -148,6 +148,7 @@ function toggleAll() {
   layers.value.exceptions = newState
   layers.value.database = newState
   layers.value.external = newState
+  layers.value.dataflow = newState
   emitChange()
 }
 

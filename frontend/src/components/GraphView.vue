@@ -42,7 +42,14 @@
       <template #node-external="{ data }">
         <ExternalCallNode :node="{ data }" />
       </template>
+      
+      <template #node-dataflow="{ data }">
+        <DataFlowNode :node="{ data }" />
+      </template>
     </VueFlow>
+    
+    <!-- Graph Legend / Help Panel -->
+    <GraphLegend />
     
     <!-- Context menu -->
     <div
@@ -78,12 +85,14 @@ import LogNode from './nodes/LogNode.vue'
 import ExceptionNode from './nodes/ExceptionNode.vue'
 import DatabaseNode from './nodes/DatabaseNode.vue'
 import ExternalCallNode from './nodes/ExternalCallNode.vue'
+import DataFlowNode from './nodes/DataFlowNode.vue'
+import GraphLegend from './GraphLegend.vue'
 
 const props = defineProps({
   layerFilter: {
     type: Object,
     default: () => ({
-      layers: { methods: true, logs: true, exceptions: true, database: true, external: true },
+      layers: { methods: true, logs: true, exceptions: true, database: true, external: true, dataflow: true },
       selectedLogLevels: ['INFO', 'WARN', 'ERROR']
     })
   }
@@ -150,6 +159,11 @@ function updateGraph(data) {
     // Filter external call nodes
     if (node.type === 'external') {
       return props.layerFilter.layers.external
+    }
+    
+    // Filter data flow nodes
+    if (node.type === 'dataflow') {
+      return props.layerFilter.layers.dataflow
     }
     
     return true
@@ -251,16 +265,38 @@ function getEdgeColor(type) {
     case 'exception': return '#fc8181'
     case 'database': return '#3b82f6'
     case 'external': return '#10b981'
+    case 'dataflow': return '#f59e0b'
     default: return '#95a5a6'
   }
 }
 
 function onNodeClick(event) {
   const nodeId = event.node.id
+  const nodeType = event.node.type
+  
+  // Special handling for dataflow nodes - show comprehensive details
+  if (nodeType === 'dataflow' && !event.event.shiftKey && !event.event.ctrlKey && !event.event.metaKey) {
+    const dataflow = store.dataFlows.find(df => df.methodId === nodeId)
+    if (dataflow) {
+      // Trigger dataflow details panel (handled by parent)
+      window.dispatchEvent(new CustomEvent('show-dataflow-details', { detail: dataflow }))
+      return
+    }
+  }
   
   // Handle multi-select with Shift key
   if (event.event.shiftKey) {
     store.toggleNodeSelection(nodeId)
+  } else if (event.event.ctrlKey || event.event.metaKey) {
+    // Smart scope expansion - show related nodes
+    const expandedNodes = store.expandScopeForNode(nodeId)
+    store.setSelectedNodes(expandedNodes)
+    
+    // Update graph to show only expanded nodes
+    const data = store.analysisData
+    if (data) {
+      updateGraphWithExpandedNodes(expandedNodes)
+    }
   } else {
     // Single select
     store.setSelectedNodes([nodeId])
@@ -272,6 +308,32 @@ function onNodeClick(event) {
   if (node) {
     store.setSelectedNode(node)
   }
+}
+
+function updateGraphWithExpandedNodes(expandedNodeIds) {
+  const data = store.analysisData
+  if (!data || !data.callGraph) return
+  
+  const expandedSet = new Set(expandedNodeIds)
+  
+  // Filter nodes
+  const filteredNodes = data.callGraph.nodes.filter(node => 
+    expandedSet.has(node.id)
+  )
+  
+  // Filter edges - only between expanded nodes
+  const filteredEdges = data.callGraph.edges.filter(edge =>
+    expandedSet.has(edge.from) && expandedSet.has(edge.to)
+  )
+  
+  // Update the graph
+  updateGraph({
+    ...data,
+    callGraph: {
+      nodes: filteredNodes,
+      edges: filteredEdges
+    }
+  })
 }
 
 function onNodeContextMenu(event) {

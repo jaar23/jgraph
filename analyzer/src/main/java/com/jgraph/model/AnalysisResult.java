@@ -42,6 +42,9 @@ public class AnalysisResult {
     @JsonProperty("externalCalls")
     private List<ExternalCall> externalCalls = new ArrayList<>();
     
+    @JsonProperty("dataFlows")
+    private List<DataFlow> dataFlows = new ArrayList<>();
+    
     @JsonProperty("callGraph")
     private CallGraph callGraph = new CallGraph();
     
@@ -158,5 +161,13 @@ public class AnalysisResult {
     
     public void setExternalCalls(List<ExternalCall> externalCalls) {
         this.externalCalls = externalCalls;
+    }
+    
+    public List<DataFlow> getDataFlows() {
+        return dataFlows;
+    }
+    
+    public void setDataFlows(List<DataFlow> dataFlows) {
+        this.dataFlows = dataFlows;
     }
 }

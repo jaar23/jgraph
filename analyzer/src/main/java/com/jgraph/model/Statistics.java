@@ -46,6 +46,9 @@ public class Statistics {
     @JsonProperty("externalCallsByType")
     private java.util.Map<String, Integer> externalCallsByType = new java.util.HashMap<>();
     
+    @JsonProperty("totalDataFlows")
+    private int totalDataFlows;
+    
     public Statistics() {}
     
     // Getters and Setters
@@ -151,5 +154,13 @@ public class Statistics {
     
     public void setExternalCallsByType(java.util.Map<String, Integer> externalCallsByType) {
         this.externalCallsByType = externalCallsByType;
+    }
+    
+    public int getTotalDataFlows() {
+        return totalDataFlows;
+    }
+    
+    public void setTotalDataFlows(int totalDataFlows) {
+        this.totalDataFlows = totalDataFlows;
     }
 }

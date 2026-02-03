@@ -65,13 +65,19 @@
     </footer>
     
     <!-- Modals -->
-    <LLMSettings v-if="showLLMSettings" @close="showLLMSettings = false" />
+    <LLMSettings :show="showLLMSettings" @close="showLLMSettings = false" />
     <ExportImportPanel v-if="showExportImport" @close="showExportImport = false" />
+    <DataFlowDetails 
+      v-if="selectedDataFlow" 
+      :dataflow="selectedDataFlow" 
+      @close="selectedDataFlow = null"
+      @expand="handleDataFlowExpand"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useAnalysisStore } from './stores/analysisStore'
 import FileUploader from './components/FileUploader.vue'
 import SearchBar from './components/SearchBar.vue'
@@ -81,11 +87,13 @@ import LLMPanel from './components/LLMPanel.vue'
 import LLMSettings from './components/LLMSettings.vue'
 import ExportImportPanel from './components/ExportImportPanel.vue'
 import LayerControls from './components/LayerControls.vue'
+import DataFlowDetails from './components/DataFlowDetails.vue'
 
 const store = useAnalysisStore()
 const showLLMSettings = ref(false)
 const showExportImport = ref(false)
 const isLLMPanelCollapsed = ref(false)
+const selectedDataFlow = ref(null)
 const layerFilter = ref({
   layers: {
     methods: true,
@@ -101,6 +109,24 @@ const layerFilter = ref({
 function handleLayerChange(newFilter) {
   layerFilter.value = newFilter
 }
+
+function handleDataFlowExpand(dataflow) {
+  const expandedNodes = store.expandDataFlow(dataflow)
+  store.setSelectedNodes(expandedNodes)
+  selectedDataFlow.value = null // Close the panel
+}
+
+function handleShowDataFlowDetails(event) {
+  selectedDataFlow.value = event.detail
+}
+
+onMounted(() => {
+  window.addEventListener('show-dataflow-details', handleShowDataFlowDetails)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('show-dataflow-details', handleShowDataFlowDetails)
+})
 </script>
 
 <style>

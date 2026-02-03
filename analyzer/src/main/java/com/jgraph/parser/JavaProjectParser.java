@@ -36,6 +36,7 @@ public class JavaProjectParser {
     private final ExceptionAnalyzer exceptionAnalyzer;
     private final DatabaseAnalyzer databaseAnalyzer;
     private final ExternalCallAnalyzer externalCallAnalyzer;
+    private final DataFlowAnalyzer dataFlowAnalyzer;
     private TypeResolver typeResolver;
     
     private final AnalysisResult analysisResult;
@@ -55,6 +56,7 @@ public class JavaProjectParser {
         this.exceptionAnalyzer = new ExceptionAnalyzer();
         this.databaseAnalyzer = new DatabaseAnalyzer();
         this.externalCallAnalyzer = new ExternalCallAnalyzer();
+        this.dataFlowAnalyzer = new DataFlowAnalyzer();
         this.analysisResult = new AnalysisResult();
     }
     
@@ -384,6 +386,11 @@ public class JavaProjectParser {
             analysisResult.getExternalCalls().add(call);
         }
         
+        // Extract data flow
+        DataFlowAnalyzer.DataFlowInfo dataFlowInfo = dataFlowAnalyzer.extractDataFlow(method);
+        DataFlow dataFlow = convertDataFlow(dataFlowInfo, serviceId, className, filePath.toString());
+        analysisResult.getDataFlows().add(dataFlow);
+        
         return serviceMethod;
     }
     
@@ -666,6 +673,34 @@ public class JavaProjectParser {
             }
         }
         
+        // Add data flow nodes
+        int dfNodeCounter = 0;
+        for (DataFlow df : analysisResult.getDataFlows()) {
+            String nodeId = "dataflow-" + dfNodeCounter++;
+            String label = "DataFlow: " + df.getMethodName();
+            GraphNode node = new GraphNode(nodeId, "dataflow", truncate(label, 50));
+            callGraph.addNode(node);
+            
+            // Connect to parent method
+            String parentMethod = df.getClassName() + "." + df.getMethodName();
+            for (ServiceMethod service : analysisResult.getServices()) {
+                String serviceMethod = service.getClassName() + "." + service.getMethodName();
+                if (serviceMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(service.getId(), nodeId, "dataflow", "tracks");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+            for (Endpoint endpoint : analysisResult.getEndpoints()) {
+                String endpointMethod = endpoint.getControllerClass() + "." + endpoint.getMethodName();
+                if (endpointMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(endpoint.getId(), nodeId, "dataflow", "tracks");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+        }
+        
         // Add edges from endpoints to services
         for (Endpoint endpoint : analysisResult.getEndpoints()) {
             for (String call : endpoint.getCallChain()) {
@@ -742,6 +777,9 @@ public class JavaProjectParser {
         }
         stats.setExternalCallsByType(callsByType);
         
+        // Data flow statistics
+        stats.setTotalDataFlows(analysisResult.getDataFlows().size());
+        
         // TODO: Implement circular dependency detection
         stats.setCircularDependencies(0);
         // TODO: Calculate max call depth
@@ -789,6 +827,56 @@ public class JavaProjectParser {
             new ArrayList<>(), // parameters not tracked by analyzer
             sourceFile, callInfo.lineNumber
         );
+    }
+    
+    /**
+     * Convert DataFlowAnalyzer.DataFlowInfo to model DataFlow
+     */
+    private DataFlow convertDataFlow(DataFlowAnalyzer.DataFlowInfo dataFlowInfo, String methodId, 
+                                     String className, String sourceFile) {
+        DataFlow dataFlow = new DataFlow(methodId, className, dataFlowInfo.methodName, sourceFile);
+        
+        // Convert parameters
+        for (DataFlowAnalyzer.ParameterInfo paramInfo : dataFlowInfo.parameters) {
+            ParameterFlow paramFlow = new ParameterFlow(paramInfo.name, paramInfo.type, paramInfo.isInputData);
+            paramFlow.setAnnotations(paramInfo.annotations);
+            dataFlow.getParameters().add(paramFlow);
+        }
+        
+        // Convert variable flows
+        for (DataFlowAnalyzer.VariableFlow varFlow : dataFlowInfo.variableFlows) {
+            VariableTransformation varTrans = new VariableTransformation(
+                varFlow.variableName, varFlow.type, varFlow.transformationType,
+                varFlow.initializedFrom, varFlow.lineNumber
+            );
+            varTrans.setTransformationMethod(varFlow.transformationMethod);
+            dataFlow.getVariables().add(varTrans);
+        }
+        
+        // Convert return flows
+        for (DataFlowAnalyzer.ReturnFlow returnFlow : dataFlowInfo.returnFlows) {
+            ReturnValue returnValue = new ReturnValue(returnFlow.expression, returnFlow.returnType, 
+                                                     returnFlow.lineNumber);
+            returnValue.setSourceVariable(returnFlow.variableName);
+            returnValue.setSourceMethod(returnFlow.methodName);
+            dataFlow.getReturns().add(returnValue);
+        }
+        
+        // Convert method call flows to data transfers
+        for (DataFlowAnalyzer.MethodCallFlow methodCallFlow : dataFlowInfo.methodCallFlows) {
+            DataTransfer dataTransfer = new DataTransfer(methodId, methodCallFlow.methodName, 
+                                                        methodCallFlow.lineNumber);
+            
+            for (DataFlowAnalyzer.ArgumentFlow argFlow : methodCallFlow.arguments) {
+                ArgumentMapping argMapping = new ArgumentMapping(argFlow.position, argFlow.type,
+                                                                argFlow.variableName, argFlow.expression);
+                dataTransfer.getArguments().add(argMapping);
+            }
+            
+            dataFlow.getDataTransfers().add(dataTransfer);
+        }
+        
+        return dataFlow;
     }
     
     /**
