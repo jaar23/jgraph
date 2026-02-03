@@ -26,6 +26,22 @@
       <template #node-repository="{ data }">
         <RepositoryNode :data="data" />
       </template>
+      
+      <template #node-log="{ data }">
+        <LogNode :data="data" />
+      </template>
+      
+      <template #node-exception="{ data }">
+        <ExceptionNode :node="{ data }" />
+      </template>
+      
+      <template #node-database="{ data }">
+        <DatabaseNode :node="{ data }" />
+      </template>
+      
+      <template #node-external="{ data }">
+        <ExternalCallNode :node="{ data }" />
+      </template>
     </VueFlow>
     
     <!-- Context menu -->
@@ -58,6 +74,20 @@ import dagre from 'dagre'
 import EndpointNode from './nodes/EndpointNode.vue'
 import ServiceNode from './nodes/ServiceNode.vue'
 import RepositoryNode from './nodes/RepositoryNode.vue'
+import LogNode from './nodes/LogNode.vue'
+import ExceptionNode from './nodes/ExceptionNode.vue'
+import DatabaseNode from './nodes/DatabaseNode.vue'
+import ExternalCallNode from './nodes/ExternalCallNode.vue'
+
+const props = defineProps({
+  layerFilter: {
+    type: Object,
+    default: () => ({
+      layers: { methods: true, logs: true, exceptions: true, database: true, external: true },
+      selectedLogLevels: ['INFO', 'WARN', 'ERROR']
+    })
+  }
+})
 
 const store = useAnalysisStore()
 const { fitView } = useVueFlow()
@@ -81,10 +111,51 @@ watch(() => store.selectedNodes, (selected) => {
   })
 }, { deep: true })
 
+// Watch for layer filter changes
+watch(() => props.layerFilter, () => {
+  const data = store.filteredData || store.analysisData
+  if (data) {
+    updateGraph(data)
+  }
+}, { deep: true })
+
 function updateGraph(data) {
   if (!data || !data.callGraph) return
   
-  const graphNodes = data.callGraph.nodes.map(node => ({
+  // Filter nodes based on layer settings
+  let filteredNodes = data.callGraph.nodes.filter(node => {
+    // Always show method nodes (endpoint, service, repository)
+    if (['endpoint', 'service', 'repository'].includes(node.type)) {
+      return props.layerFilter.layers.methods
+    }
+    
+    // Filter log nodes
+    if (node.type === 'log') {
+      if (!props.layerFilter.layers.logs) return false
+      // Filter by log level
+      const logLevel = node.logLevel || node.level
+      return props.layerFilter.selectedLogLevels.includes(logLevel)
+    }
+    
+    // Filter exception nodes
+    if (node.type === 'exception') {
+      return props.layerFilter.layers.exceptions
+    }
+    
+    // Filter database nodes
+    if (node.type === 'database') {
+      return props.layerFilter.layers.database
+    }
+    
+    // Filter external call nodes
+    if (node.type === 'external') {
+      return props.layerFilter.layers.external
+    }
+    
+    return true
+  })
+  
+  const graphNodes = filteredNodes.map(node => ({
     id: node.id,
     type: node.type,
     position: { x: 0, y: 0 }, // Will be set by layout
@@ -97,7 +168,13 @@ function updateGraph(data) {
     selected: store.selectedNodes.includes(node.id)
   }))
   
-  const graphEdges = data.callGraph.edges.map((edge, index) => ({
+  // Filter edges - only keep edges between visible nodes
+  const visibleNodeIds = new Set(graphNodes.map(n => n.id))
+  const filteredEdges = data.callGraph.edges.filter(edge => 
+    visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to)
+  )
+  
+  const graphEdges = filteredEdges.map((edge, index) => ({
     id: edge.id || `edge-${index}`,
     source: edge.from,
     target: edge.to,
@@ -170,6 +247,10 @@ function getEdgeColor(type) {
   switch (type) {
     case 'method_call': return '#3498db'
     case 'dependency_injection': return '#9b59b6'
+    case 'log': return '#1abc9c'
+    case 'exception': return '#fc8181'
+    case 'database': return '#3b82f6'
+    case 'external': return '#10b981'
     default: return '#95a5a6'
   }
 }

@@ -36,6 +36,15 @@ public class ServiceMethod {
     @JsonProperty("calls")
     private List<String> calls = new ArrayList<>();
     
+    @JsonProperty("resolvedCalls")
+    private List<ResolvedMethodCall> resolvedCalls = new ArrayList<>();
+    
+    @JsonProperty("controlFlow")
+    private ControlFlow controlFlow;
+    
+    @JsonProperty("fullyQualifiedType")
+    private String fullyQualifiedType;
+    
     @JsonProperty("javadoc")
     private String javadoc;
     
@@ -147,5 +156,29 @@ public class ServiceMethod {
     
     public void setFilePath(String filePath) {
         this.filePath = filePath;
+    }
+    
+    public List<ResolvedMethodCall> getResolvedCalls() {
+        return resolvedCalls;
+    }
+    
+    public void setResolvedCalls(List<ResolvedMethodCall> resolvedCalls) {
+        this.resolvedCalls = resolvedCalls;
+    }
+    
+    public ControlFlow getControlFlow() {
+        return controlFlow;
+    }
+    
+    public void setControlFlow(ControlFlow controlFlow) {
+        this.controlFlow = controlFlow;
+    }
+    
+    public String getFullyQualifiedType() {
+        return fullyQualifiedType;
+    }
+    
+    public void setFullyQualifiedType(String fullyQualifiedType) {
+        this.fullyQualifiedType = fullyQualifiedType;
     }
 }

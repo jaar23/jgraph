@@ -61,6 +61,12 @@ Please provide:
   const endpoints = computed(() => analysisData.value?.endpoints || [])
   const services = computed(() => analysisData.value?.services || [])
   const repositories = computed(() => analysisData.value?.repositories || [])
+  const logStatements = computed(() => analysisData.value?.logStatements || [])
+  const tryCatchBlocks = computed(() => analysisData.value?.tryCatchBlocks || [])
+  const exceptionHandlers = computed(() => analysisData.value?.exceptionHandlers || [])
+  const databaseOperations = computed(() => analysisData.value?.databaseOperations || [])
+  const transactions = computed(() => analysisData.value?.transactions || [])
+  const externalCalls = computed(() => analysisData.value?.externalCalls || [])
   const callGraph = computed(() => analysisData.value?.callGraph || { nodes: [], edges: [] })
   const statistics = computed(() => analysisData.value?.statistics || {})
 
@@ -132,10 +138,15 @@ Please provide:
       matchesKeyword(repo, keyword)
     )
 
+    const filteredLogs = logStatements.value.filter(log => 
+      matchesLogKeyword(log, keyword)
+    )
+
     const filteredNodeIds = new Set([
       ...filteredEndpoints.map(e => e.id),
       ...filteredServices.map(s => s.id),
-      ...filteredRepositories.map(r => r.id)
+      ...filteredRepositories.map(r => r.id),
+      ...filteredLogs.map(l => l.id)
     ])
 
     filteredEndpoints.forEach(endpoint => {
@@ -171,11 +182,28 @@ Please provide:
       endpoints: filteredEndpoints,
       services: filteredServices,
       repositories: filteredRepositories,
+      logStatements: filteredLogs,
       callGraph: {
         nodes: filteredNodes,
         edges: filteredEdges
       }
     }
+  }
+
+  function matchesLogKeyword(log, keyword) {
+    const searchableFields = [
+      log.message,
+      log.level,
+      log.loggerFramework,
+      log.filePath,
+      log.exceptionVariable,
+      ...(log.variables || []),
+      ...(log.mdcKeys || [])
+    ]
+
+    return searchableFields.some(field => 
+      field && field.toString().toLowerCase().includes(keyword)
+    )
   }
 
   function matchesKeyword(item, keyword) {
@@ -435,6 +463,12 @@ Please provide:
     endpoints,
     services,
     repositories,
+    logStatements,
+    tryCatchBlocks,
+    exceptionHandlers,
+    databaseOperations,
+    transactions,
+    externalCalls,
     callGraph,
     statistics,
     hasUnsavedChanges,

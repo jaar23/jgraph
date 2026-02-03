@@ -11,7 +11,7 @@ public class GraphNode {
     private String id;
     
     @JsonProperty("type")
-    private String type; // endpoint, service, repository
+    private String type; // endpoint, service, repository, log
     
     @JsonProperty("label")
     private String label;
@@ -21,6 +21,12 @@ public class GraphNode {
     
     @JsonProperty("methodName")
     private String methodName;
+    
+    @JsonProperty("logLevel")
+    private String logLevel;
+    
+    @JsonProperty("logMessage")
+    private String logMessage;
     
     public GraphNode() {}
     
@@ -69,5 +75,21 @@ public class GraphNode {
     
     public void setMethodName(String methodName) {
         this.methodName = methodName;
+    }
+    
+    public String getLogLevel() {
+        return logLevel;
+    }
+    
+    public void setLogLevel(String logLevel) {
+        this.logLevel = logLevel;
+    }
+    
+    public String getLogMessage() {
+        return logMessage;
+    }
+    
+    public void setLogMessage(String logMessage) {
+        this.logMessage = logMessage;
     }
 }

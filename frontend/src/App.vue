@@ -36,7 +36,10 @@
         
         <div class="visualization-area">
           <div class="graph-section">
-            <GraphView />
+            <div class="layer-controls-container">
+              <LayerControls @change="handleLayerChange" />
+            </div>
+            <GraphView :layer-filter="layerFilter" />
           </div>
           
           <div class="details-section">
@@ -77,11 +80,27 @@ import NodeDetailsEnhanced from './components/NodeDetailsEnhanced.vue'
 import LLMPanel from './components/LLMPanel.vue'
 import LLMSettings from './components/LLMSettings.vue'
 import ExportImportPanel from './components/ExportImportPanel.vue'
+import LayerControls from './components/LayerControls.vue'
 
 const store = useAnalysisStore()
 const showLLMSettings = ref(false)
 const showExportImport = ref(false)
 const isLLMPanelCollapsed = ref(false)
+const layerFilter = ref({
+  layers: {
+    methods: true,
+    logs: true,
+    errors: false,
+    data: false,
+    db: false,
+    external: false
+  },
+  selectedLogLevels: ['INFO', 'WARN', 'ERROR']
+})
+
+function handleLayerChange(newFilter) {
+  layerFilter.value = newFilter
+}
 </script>
 
 <style>
@@ -195,8 +214,20 @@ body {
 }
 
 .graph-section {
+  position: relative;
   overflow: hidden;
   background-color: white;
+  display: flex;
+  flex-direction: column;
+}
+
+.layer-controls-container {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 10;
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
 }
 
 .details-section {

@@ -24,6 +24,24 @@ public class AnalysisResult {
     @JsonProperty("dependencies")
     private List<Dependency> dependencies = new ArrayList<>();
     
+    @JsonProperty("logStatements")
+    private List<LogStatement> logStatements = new ArrayList<>();
+    
+    @JsonProperty("exceptionHandlers")
+    private List<ExceptionHandler> exceptionHandlers = new ArrayList<>();
+    
+    @JsonProperty("tryCatchBlocks")
+    private List<TryCatchBlock> tryCatchBlocks = new ArrayList<>();
+    
+    @JsonProperty("databaseOperations")
+    private List<DatabaseOperation> databaseOperations = new ArrayList<>();
+    
+    @JsonProperty("transactions")
+    private List<Transaction> transactions = new ArrayList<>();
+    
+    @JsonProperty("externalCalls")
+    private List<ExternalCall> externalCalls = new ArrayList<>();
+    
     @JsonProperty("callGraph")
     private CallGraph callGraph = new CallGraph();
     
@@ -78,6 +96,14 @@ public class AnalysisResult {
         this.dependencies = dependencies;
     }
     
+    public List<LogStatement> getLogStatements() {
+        return logStatements;
+    }
+    
+    public void setLogStatements(List<LogStatement> logStatements) {
+        this.logStatements = logStatements;
+    }
+    
     public CallGraph getCallGraph() {
         return callGraph;
     }
@@ -92,5 +118,45 @@ public class AnalysisResult {
     
     public void setStatistics(Statistics statistics) {
         this.statistics = statistics;
+    }
+    
+    public List<ExceptionHandler> getExceptionHandlers() {
+        return exceptionHandlers;
+    }
+    
+    public void setExceptionHandlers(List<ExceptionHandler> exceptionHandlers) {
+        this.exceptionHandlers = exceptionHandlers;
+    }
+    
+    public List<TryCatchBlock> getTryCatchBlocks() {
+        return tryCatchBlocks;
+    }
+    
+    public void setTryCatchBlocks(List<TryCatchBlock> tryCatchBlocks) {
+        this.tryCatchBlocks = tryCatchBlocks;
+    }
+    
+    public List<DatabaseOperation> getDatabaseOperations() {
+        return databaseOperations;
+    }
+    
+    public void setDatabaseOperations(List<DatabaseOperation> databaseOperations) {
+        this.databaseOperations = databaseOperations;
+    }
+    
+    public List<Transaction> getTransactions() {
+        return transactions;
+    }
+    
+    public void setTransactions(List<Transaction> transactions) {
+        this.transactions = transactions;
+    }
+    
+    public List<ExternalCall> getExternalCalls() {
+        return externalCalls;
+    }
+    
+    public void setExternalCalls(List<ExternalCall> externalCalls) {
+        this.externalCalls = externalCalls;
     }
 }

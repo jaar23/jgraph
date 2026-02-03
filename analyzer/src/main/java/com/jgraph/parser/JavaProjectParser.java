@@ -1,6 +1,7 @@
 package com.jgraph.parser;
 
 import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -29,15 +30,31 @@ public class JavaProjectParser {
     
     private final JavaParser javaParser;
     private final AnnotationDetector annotationDetector;
-    private final MethodCallAnalyzer methodCallAnalyzer;
+    private MethodCallAnalyzer methodCallAnalyzer;
+    private final LoggingAnalyzer loggingAnalyzer;
+    private final ControlFlowAnalyzer controlFlowAnalyzer;
+    private final ExceptionAnalyzer exceptionAnalyzer;
+    private final DatabaseAnalyzer databaseAnalyzer;
+    private final ExternalCallAnalyzer externalCallAnalyzer;
+    private TypeResolver typeResolver;
     
     private final AnalysisResult analysisResult;
     private final Map<String, ClassOrInterfaceDeclaration> classMap = new HashMap<>();
+    private final Map<String, CompilationUnit> compilationUnitMap = new HashMap<>();
+    private final List<CompilationUnit> allCompilationUnits = new ArrayList<>();
     
     public JavaProjectParser() {
-        this.javaParser = new JavaParser();
+        // Configure JavaParser to support Java 21 features (including pattern matching, switch expressions, etc.)
+        ParserConfiguration parserConfiguration = new ParserConfiguration();
+        parserConfiguration.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21);
+        
+        this.javaParser = new JavaParser(parserConfiguration);
         this.annotationDetector = new AnnotationDetector();
-        this.methodCallAnalyzer = new MethodCallAnalyzer();
+        this.loggingAnalyzer = new LoggingAnalyzer();
+        this.controlFlowAnalyzer = new ControlFlowAnalyzer();
+        this.exceptionAnalyzer = new ExceptionAnalyzer();
+        this.databaseAnalyzer = new DatabaseAnalyzer();
+        this.externalCallAnalyzer = new ExternalCallAnalyzer();
         this.analysisResult = new AnalysisResult();
     }
     
@@ -120,10 +137,17 @@ public class JavaProjectParser {
      * Analyze a compilation unit (parsed Java file)
      */
     private void analyzeCompilationUnit(CompilationUnit cu, Path filePath) {
+        // Store for later exception handler analysis
+        allCompilationUnits.add(cu);
+        
+        // Detect logging framework
+        loggingAnalyzer.detectFramework(cu);
+        
         // Find all classes and interfaces
         cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
             String fullClassName = getFullClassName(cu, classDecl);
             classMap.put(fullClassName, classDecl);
+            compilationUnitMap.put(fullClassName, cu);
             
             // Detect controllers (endpoints)
             if (annotationDetector.isController(classDecl)) {
@@ -215,6 +239,42 @@ public class JavaProjectParser {
         method.getBegin().ifPresent(pos -> endpoint.setLineNumber(pos.line));
         endpoint.setFilePath(filePath.toString());
         
+        // Set fully qualified type
+        endpoint.setFullyQualifiedType(className);
+        
+        // Analyze control flow
+        ControlFlow controlFlow = controlFlowAnalyzer.analyze(method);
+        endpoint.setControlFlow(controlFlow);
+        
+        // Extract log statements
+        List<LogStatement> logs = loggingAnalyzer.extractLogStatements(method, endpointId, filePath.toString());
+        analysisResult.getLogStatements().addAll(logs);
+        
+        // Extract exception handling
+        List<ExceptionAnalyzer.TryCatchInfo> tryCatchInfos = exceptionAnalyzer.extractTryCatchBlocks(method);
+        for (ExceptionAnalyzer.TryCatchInfo info : tryCatchInfos) {
+            TryCatchBlock block = new TryCatchBlock(
+                className, method.getNameAsString(), info.caughtTypes,
+                info.hasFinally, info.hasRethrow, null, // wrapsException not tracked by analyzer
+                filePath.toString(), info.startLine
+            );
+            analysisResult.getTryCatchBlocks().add(block);
+        }
+        
+        // Extract database operations (endpoints typically don't have direct DB access, but check anyway)
+        List<DatabaseAnalyzer.DatabaseOperation> dbOps = databaseAnalyzer.extractDatabaseOperations(method, className);
+        for (DatabaseAnalyzer.DatabaseOperation dbOp : dbOps) {
+            DatabaseOperation operation = convertDatabaseOperation(dbOp, filePath.toString());
+            analysisResult.getDatabaseOperations().add(operation);
+        }
+        
+        // Extract external calls
+        List<ExternalCallAnalyzer.ExternalCall> externalCallInfos = externalCallAnalyzer.extractExternalCalls(method, className);
+        for (ExternalCallAnalyzer.ExternalCall callInfo : externalCallInfos) {
+            ExternalCall call = convertExternalCall(callInfo, filePath.toString());
+            analysisResult.getExternalCalls().add(call);
+        }
+        
         return endpoint;
     }
     
@@ -264,6 +324,65 @@ public class JavaProjectParser {
         // Line number and file path
         method.getBegin().ifPresent(pos -> serviceMethod.setLineNumber(pos.line));
         serviceMethod.setFilePath(filePath.toString());
+        
+        // Set fully qualified type
+        serviceMethod.setFullyQualifiedType(className);
+        
+        // Analyze control flow
+        ControlFlow controlFlow = controlFlowAnalyzer.analyze(method);
+        serviceMethod.setControlFlow(controlFlow);
+        
+        // Extract log statements
+        List<LogStatement> logs = loggingAnalyzer.extractLogStatements(method, serviceId, filePath.toString());
+        analysisResult.getLogStatements().addAll(logs);
+        
+        // Extract exception handling
+        List<ExceptionAnalyzer.TryCatchInfo> tryCatchInfos = exceptionAnalyzer.extractTryCatchBlocks(method);
+        for (ExceptionAnalyzer.TryCatchInfo info : tryCatchInfos) {
+            TryCatchBlock block = new TryCatchBlock(
+                className, method.getNameAsString(), info.caughtTypes,
+                info.hasFinally, info.hasRethrow, null, // wrapsException not tracked by analyzer
+                filePath.toString(), info.startLine
+            );
+            analysisResult.getTryCatchBlocks().add(block);
+        }
+        
+        // Extract database operations
+        List<DatabaseAnalyzer.DatabaseOperation> dbOps = databaseAnalyzer.extractDatabaseOperations(method, className);
+        for (DatabaseAnalyzer.DatabaseOperation dbOp : dbOps) {
+            DatabaseOperation operation = convertDatabaseOperation(dbOp, filePath.toString());
+            analysisResult.getDatabaseOperations().add(operation);
+        }
+        
+        // Extract transaction info
+        DatabaseAnalyzer.TransactionInfo txInfo = databaseAnalyzer.extractTransactionInfo(method);
+        if (txInfo != null) {
+            // Parse timeout from string to int
+            int timeoutVal = -1;
+            if (txInfo.timeout != null) {
+                try {
+                    timeoutVal = Integer.parseInt(txInfo.timeout);
+                } catch (NumberFormatException e) {
+                    // Keep default -1 if parsing fails
+                }
+            }
+            
+            Transaction transaction = new Transaction(
+                className, txInfo.methodName,
+                txInfo.propagation, txInfo.isolation,
+                txInfo.readOnly, timeoutVal,
+                null, null, // rollbackFor and noRollbackFor not tracked by analyzer
+                filePath.toString(), txInfo.lineNumber
+            );
+            analysisResult.getTransactions().add(transaction);
+        }
+        
+        // Extract external calls
+        List<ExternalCallAnalyzer.ExternalCall> externalCallInfos = externalCallAnalyzer.extractExternalCalls(method, className);
+        for (ExternalCallAnalyzer.ExternalCall callInfo : externalCallInfos) {
+            ExternalCall call = convertExternalCall(callInfo, filePath.toString());
+            analysisResult.getExternalCalls().add(call);
+        }
         
         return serviceMethod;
     }
@@ -354,6 +473,10 @@ public class JavaProjectParser {
      * Analyze method calls (second pass)
      */
     private void analyzeMethodCalls() {
+        // Initialize TypeResolver and MethodCallAnalyzer after all classes are parsed
+        this.typeResolver = new TypeResolver(classMap);
+        this.methodCallAnalyzer = new MethodCallAnalyzer(typeResolver);
+        
         // Analyze calls in endpoints
         for (Endpoint endpoint : analysisResult.getEndpoints()) {
             List<String> calls = methodCallAnalyzer.extractMethodCalls(endpoint, classMap);
@@ -364,6 +487,27 @@ public class JavaProjectParser {
         for (ServiceMethod service : analysisResult.getServices()) {
             List<String> calls = methodCallAnalyzer.extractMethodCalls(service, classMap);
             service.setCalls(calls);
+        }
+        
+        // Extract global exception handlers
+        extractGlobalExceptionHandlers();
+    }
+    
+    /**
+     * Extract global exception handlers (@ControllerAdvice, @ExceptionHandler)
+     */
+    private void extractGlobalExceptionHandlers() {
+        List<ExceptionAnalyzer.ExceptionHandlerInfo> handlers = 
+            exceptionAnalyzer.findExceptionHandlers(allCompilationUnits);
+        
+        for (ExceptionAnalyzer.ExceptionHandlerInfo info : handlers) {
+            ExceptionHandler handler = new ExceptionHandler(
+                info.handlerClass, info.handlerMethod,
+                info.handledExceptionTypes, false, // isGlobal not tracked, default to false
+                null, // responseStatus not tracked
+                null, info.lineNumber // sourceFile not tracked
+            );
+            analysisResult.getExceptionHandlers().add(handler);
         }
     }
     
@@ -400,6 +544,128 @@ public class JavaProjectParser {
             callGraph.addNode(node);
         }
         
+        // Add log statement nodes
+        for (LogStatement log : analysisResult.getLogStatements()) {
+            GraphNode node = new GraphNode(log.getId(), "log", 
+                log.getLevel() + ": " + truncate(log.getMessage(), 40));
+            node.setLogLevel(log.getLevel().toString());
+            node.setLogMessage(log.getMessage());
+            callGraph.addNode(node);
+        }
+        
+        // Add exception nodes (try-catch blocks)
+        int exceptionNodeCounter = 0;
+        for (TryCatchBlock block : analysisResult.getTryCatchBlocks()) {
+            String nodeId = "exception-" + exceptionNodeCounter++;
+            String label = "Try-Catch: " + String.join(", ", block.getCaughtExceptions());
+            GraphNode node = new GraphNode(nodeId, "exception", truncate(label, 50));
+            callGraph.addNode(node);
+            
+            // Find the parent method and create edge
+            String parentMethod = block.getParentClassName() + "." + block.getParentMethodName();
+            for (Endpoint endpoint : analysisResult.getEndpoints()) {
+                String endpointMethod = endpoint.getControllerClass() + "." + endpoint.getMethodName();
+                if (endpointMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(endpoint.getId(), nodeId, "exception", "handles");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+            for (ServiceMethod service : analysisResult.getServices()) {
+                String serviceMethod = service.getClassName() + "." + service.getMethodName();
+                if (serviceMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(service.getId(), nodeId, "exception", "handles");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+        }
+        
+        // Add exception handler nodes
+        for (ExceptionHandler handler : analysisResult.getExceptionHandlers()) {
+            String nodeId = "handler-" + handler.getClassName() + "-" + handler.getMethodName();
+            String label = "Handler: " + handler.getMethodName();
+            GraphNode node = new GraphNode(nodeId, "exception", truncate(label, 50));
+            callGraph.addNode(node);
+        }
+        
+        // Add database operation nodes
+        int dbNodeCounter = 0;
+        for (DatabaseOperation dbOp : analysisResult.getDatabaseOperations()) {
+            String nodeId = "db-" + dbNodeCounter++;
+            String label = dbOp.getOperationType() + ": " + (dbOp.getQuery() != null ? dbOp.getQuery() : dbOp.getMethodName());
+            GraphNode node = new GraphNode(nodeId, "database", truncate(label, 50));
+            callGraph.addNode(node);
+            
+            // Find the parent method and create edge
+            String parentMethod = dbOp.getClassName() + "." + dbOp.getMethodName();
+            for (ServiceMethod service : analysisResult.getServices()) {
+                String serviceMethod = service.getClassName() + "." + service.getMethodName();
+                if (serviceMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(service.getId(), nodeId, "database", "queries");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+            for (RepositoryMethod repo : analysisResult.getRepositories()) {
+                String repoMethod = repo.getClassName() + "." + repo.getMethodName();
+                if (repoMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(repo.getId(), nodeId, "database", "queries");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+        }
+        
+        // Add transaction nodes
+        int txNodeCounter = 0;
+        for (Transaction tx : analysisResult.getTransactions()) {
+            String nodeId = "tx-" + txNodeCounter++;
+            String label = "TX: " + tx.getMethodName() + " (" + tx.getPropagation() + ")";
+            GraphNode node = new GraphNode(nodeId, "database", truncate(label, 50));
+            callGraph.addNode(node);
+            
+            // Find the parent method and create edge
+            String parentMethod = tx.getClassName() + "." + tx.getMethodName();
+            for (ServiceMethod service : analysisResult.getServices()) {
+                String serviceMethod = service.getClassName() + "." + service.getMethodName();
+                if (serviceMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(service.getId(), nodeId, "database", "transactional");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+        }
+        
+        // Add external call nodes
+        int extNodeCounter = 0;
+        for (ExternalCall extCall : analysisResult.getExternalCalls()) {
+            String nodeId = "ext-" + extNodeCounter++;
+            String label = extCall.getType() + ": " + (extCall.getMethod() != null ? extCall.getMethod() + " " : "") + 
+                          (extCall.getEndpoint() != null ? extCall.getEndpoint() : "");
+            GraphNode node = new GraphNode(nodeId, "external", truncate(label, 50));
+            callGraph.addNode(node);
+            
+            // Find the parent method and create edge
+            String parentMethod = extCall.getCallingClass() + "." + extCall.getCallingMethod();
+            for (Endpoint endpoint : analysisResult.getEndpoints()) {
+                String endpointMethod = endpoint.getControllerClass() + "." + endpoint.getMethodName();
+                if (endpointMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(endpoint.getId(), nodeId, "external", "calls");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+            for (ServiceMethod service : analysisResult.getServices()) {
+                String serviceMethod = service.getClassName() + "." + service.getMethodName();
+                if (serviceMethod.equals(parentMethod)) {
+                    GraphEdge edge = new GraphEdge(service.getId(), nodeId, "external", "calls");
+                    callGraph.addEdge(edge);
+                    break;
+                }
+            }
+        }
+        
         // Add edges from endpoints to services
         for (Endpoint endpoint : analysisResult.getEndpoints()) {
             for (String call : endpoint.getCallChain()) {
@@ -430,6 +696,15 @@ public class JavaProjectParser {
                 }
             }
         }
+        
+        // Add edges from methods to log statements
+        for (LogStatement log : analysisResult.getLogStatements()) {
+            String methodId = log.getMethodId();
+            if (methodId != null && !methodId.isEmpty()) {
+                GraphEdge edge = new GraphEdge(methodId, log.getId(), "log", "logs");
+                callGraph.addEdge(edge);
+            }
+        }
     }
     
     /**
@@ -440,10 +715,90 @@ public class JavaProjectParser {
         stats.setTotalEndpoints(analysisResult.getEndpoints().size());
         stats.setTotalServices(analysisResult.getServices().size());
         stats.setTotalRepositories(analysisResult.getRepositories().size());
+        
+        // Log statistics
+        stats.setTotalLogStatements(analysisResult.getLogStatements().size());
+        Map<String, Integer> logsByLevel = new HashMap<>();
+        for (LogStatement log : analysisResult.getLogStatements()) {
+            String level = log.getLevel().toString();
+            logsByLevel.put(level, logsByLevel.getOrDefault(level, 0) + 1);
+        }
+        stats.setLogsByLevel(logsByLevel);
+        
+        // Exception statistics
+        stats.setTotalExceptionHandlers(analysisResult.getExceptionHandlers().size());
+        stats.setTotalTryCatchBlocks(analysisResult.getTryCatchBlocks().size());
+        
+        // Database statistics
+        stats.setTotalDatabaseOperations(analysisResult.getDatabaseOperations().size());
+        stats.setTotalTransactions(analysisResult.getTransactions().size());
+        
+        // External call statistics
+        stats.setTotalExternalCalls(analysisResult.getExternalCalls().size());
+        Map<String, Integer> callsByType = new HashMap<>();
+        for (ExternalCall call : analysisResult.getExternalCalls()) {
+            String type = call.getType();
+            callsByType.put(type, callsByType.getOrDefault(type, 0) + 1);
+        }
+        stats.setExternalCallsByType(callsByType);
+        
         // TODO: Implement circular dependency detection
         stats.setCircularDependencies(0);
         // TODO: Calculate max call depth
         stats.setMaxCallDepth(0);
+    }
+    
+    /**
+     * Convert DatabaseAnalyzer.DatabaseOperation to model DatabaseOperation
+     */
+    private DatabaseOperation convertDatabaseOperation(DatabaseAnalyzer.DatabaseOperation dbOp, String sourceFile) {
+        // Determine operation type from the type or query
+        String operationType = dbOp.type != null ? dbOp.type : "UNKNOWN";
+        
+        return new DatabaseOperation(
+            dbOp.dbFramework, operationType, dbOp.query,
+            dbOp.methodName, dbOp.className,
+            dbOp.repositoryMethod, null, // entityType not tracked by analyzer
+            dbOp.isNativeQuery, new ArrayList<>(), // parameters not tracked by analyzer
+            sourceFile, dbOp.lineNumber
+        );
+    }
+    
+    /**
+     * Convert ExternalCallAnalyzer.ExternalCall to model ExternalCall
+     */
+    private ExternalCall convertExternalCall(ExternalCallAnalyzer.ExternalCall callInfo, String sourceFile) {
+        // Determine the endpoint based on the type
+        String endpoint = null;
+        if (callInfo.url != null) {
+            endpoint = callInfo.url;
+        } else if (callInfo.topic != null) {
+            endpoint = callInfo.topic;
+        } else if (callInfo.cacheKey != null) {
+            endpoint = callInfo.cacheKey;
+        }
+        
+        // Determine the method (HTTP method or operation)
+        String method = callInfo.httpMethod != null ? callInfo.httpMethod : callInfo.operation;
+        
+        return new ExternalCall(
+            callInfo.type, method, endpoint,
+            callInfo.callingMethod, callInfo.className,
+            callInfo.clientType, callInfo.isAsync,
+            null, null, // requestBody and responseType not tracked by analyzer
+            new ArrayList<>(), // parameters not tracked by analyzer
+            sourceFile, callInfo.lineNumber
+        );
+    }
+    
+    /**
+     * Truncate a string to specified length
+     */
+    private String truncate(String str, int maxLength) {
+        if (str == null || str.length() <= maxLength) {
+            return str;
+        }
+        return str.substring(0, maxLength) + "...";
     }
     
     /**
