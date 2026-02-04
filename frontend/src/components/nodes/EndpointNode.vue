@@ -1,11 +1,17 @@
 <template>
-  <div class="endpoint-node" :class="{ 'has-annotation': data.hasAnnotation }">
+  <div class="endpoint-node" :class="{ 'has-annotation': data.hasAnnotation, 'has-source': data.hasSource }">
     <div class="node-header">
       <span class="http-method" :class="data.httpMethod">{{ data.httpMethod }}</span>
-      <span class="annotation-indicator" v-if="data.hasAnnotation" title="Has annotations">📝</span>
+      <div class="node-indicators">
+        <span class="source-indicator" v-if="data.hasSource" title="Source code details available">📄</span>
+        <span class="annotation-indicator" v-if="data.hasAnnotation" title="Has annotations">📝</span>
+      </div>
     </div>
     <div class="node-path">{{ data.path || data.label }}</div>
     <div class="node-meta">{{ getShortName(data.className || data.controllerClass) }}</div>
+    <div v-if="data.summary" class="node-summary" :title="data.summary">
+      {{ truncateSummary(data.summary) }}
+    </div>
   </div>
 </template>
 
@@ -21,6 +27,13 @@ function getShortName(fullName) {
   if (!fullName) return ''
   const parts = fullName.split('.')
   return parts[parts.length - 1]
+}
+
+function truncateSummary(summary) {
+  if (!summary) return ''
+  const maxLength = 60
+  if (summary.length <= maxLength) return summary
+  return summary.substring(0, maxLength) + '...'
 }
 </script>
 
@@ -45,11 +58,21 @@ function getShortName(fullName) {
   border-color: #f39c12;
 }
 
+.endpoint-node.has-source {
+  border-left: 4px solid #3498db;
+}
+
 .node-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 0.5rem;
+}
+
+.node-indicators {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
 }
 
 .http-method {
@@ -59,6 +82,12 @@ function getShortName(fullName) {
   font-size: 0.75rem;
   font-weight: 700;
   background-color: rgba(255, 255, 255, 0.3);
+}
+
+.source-indicator {
+  font-size: 0.9rem;
+  cursor: help;
+  opacity: 0.9;
 }
 
 .annotation-indicator {
@@ -77,5 +106,15 @@ function getShortName(fullName) {
   font-size: 0.75rem;
   opacity: 0.9;
   font-family: monospace;
+}
+
+.node-summary {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 0.8rem;
+  opacity: 0.95;
+  font-style: italic;
+  line-height: 1.4;
 }
 </style>

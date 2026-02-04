@@ -13,9 +13,14 @@
       <div class="results-summary">
         <div class="summary-header">
           <h3>🎯 Trace Results</h3>
-          <button @click="exportResults" class="export-btn" title="Export search results as JSON">
-            💾 Export
-          </button>
+          <div class="summary-actions">
+            <button @click="showDebugInfo = !showDebugInfo" class="debug-btn" title="Show/hide debug information">
+              {{ showDebugInfo ? '🔍 Hide Debug' : '🔍 Show Debug' }}
+            </button>
+            <button @click="exportResults" class="export-btn" title="Export search results as JSON">
+              💾 Export
+            </button>
+          </div>
         </div>
         <div class="summary-stats">
           <div class="stat">
@@ -33,6 +38,34 @@
           <div class="stat">
             <span class="stat-value">{{ results.confidence.level }}</span>
             <span class="stat-label">Confidence</span>
+          </div>
+        </div>
+        
+        <!-- Debug Info -->
+        <div v-if="showDebugInfo" class="debug-info">
+          <h4>🔍 Debug Information</h4>
+          <div class="debug-section">
+            <div class="debug-item">
+              <strong>Input Type:</strong> {{ results.inputType }}
+            </div>
+            <div class="debug-item">
+              <strong>Raw Logs Found:</strong> {{ results.logs?.length || 0 }}
+              <span v-if="results.logs && results.logs.length > 0" class="debug-detail">
+                (Top match: {{ results.logs[0].score }}% confidence - {{ truncate(results.logs[0].log.message, 50) }})
+              </span>
+            </div>
+            <div class="debug-item">
+              <strong>Raw DataFlows Found:</strong> {{ results.dataFlows?.length || 0 }}
+              <span v-if="results.dataFlows && results.dataFlows.length > 0" class="debug-detail">
+                (Top match: {{ results.dataFlows[0].score }}% confidence)
+              </span>
+            </div>
+            <div class="debug-item">
+              <strong>Components After Filtering:</strong> {{ results.components?.length || 0 }}
+            </div>
+            <div v-if="results.components.length === 0 && (results.logs?.length > 0 || results.dataFlows?.length > 0)" class="debug-warning">
+              ⚠️ Found logs/dataflows but couldn't link them to components. This may indicate orphaned logs or disconnected dataflows.
+            </div>
           </div>
         </div>
       </div>
@@ -200,6 +233,7 @@ defineEmits(['show-in-graph', 'expand-boundary'])
 const expandedComponents = ref(new Set())
 const timelineVisible = ref(false)
 const selectedDataFlow = ref(null)
+const showDebugInfo = ref(false)
 
 function getTypeIcon(type) {
   const icons = {
@@ -311,6 +345,12 @@ function exportResults() {
   font-size: 1.1rem;
 }
 
+.summary-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.debug-btn,
 .export-btn {
   padding: 0.5rem 1rem;
   background: rgba(255, 255, 255, 0.2);
@@ -323,9 +363,55 @@ function exportResults() {
   transition: all 0.2s;
 }
 
+.debug-btn:hover,
 .export-btn:hover {
   background: rgba(255, 255, 255, 0.3);
   transform: translateY(-1px);
+}
+
+.debug-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.debug-info h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  opacity: 0.95;
+}
+
+.debug-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.debug-item {
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+
+.debug-item strong {
+  opacity: 1;
+  margin-right: 0.5rem;
+}
+
+.debug-detail {
+  font-size: 0.8rem;
+  opacity: 0.8;
+  font-style: italic;
+}
+
+.debug-warning {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(255, 193, 7, 0.2);
+  border-radius: 4px;
+  border-left: 3px solid rgba(255, 193, 7, 0.8);
+  font-size: 0.85rem;
 }
 
 .summary-stats {

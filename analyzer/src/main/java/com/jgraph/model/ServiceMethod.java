@@ -1,6 +1,8 @@
 package com.jgraph.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.jgraph.model.source.ComplexityMetrics;
+import com.jgraph.model.source.OperationSummary;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -53,6 +55,19 @@ public class ServiceMethod {
     
     @JsonProperty("filePath")
     private String filePath;
+    
+    // Source code enhancements
+    @JsonProperty("sourceMapRef")
+    private String sourceMapRef;  // Reference to source-map.json entry
+    
+    @JsonProperty("complexity")
+    private ComplexityMetrics complexity;
+    
+    @JsonProperty("operations")
+    private OperationSummary operations;
+    
+    @JsonProperty("summary")
+    private String summary;  // Natural language summary
     
     // Constructors
     public ServiceMethod() {}
@@ -180,5 +195,37 @@ public class ServiceMethod {
     
     public void setFullyQualifiedType(String fullyQualifiedType) {
         this.fullyQualifiedType = fullyQualifiedType;
+    }
+    
+    public String getSourceMapRef() {
+        return sourceMapRef;
+    }
+    
+    public void setSourceMapRef(String sourceMapRef) {
+        this.sourceMapRef = sourceMapRef;
+    }
+    
+    public ComplexityMetrics getComplexity() {
+        return complexity;
+    }
+    
+    public void setComplexity(ComplexityMetrics complexity) {
+        this.complexity = complexity;
+    }
+    
+    public OperationSummary getOperations() {
+        return operations;
+    }
+    
+    public void setOperations(OperationSummary operations) {
+        this.operations = operations;
+    }
+    
+    public String getSummary() {
+        return summary;
+    }
+    
+    public void setSummary(String summary) {
+        this.summary = summary;
     }
 }

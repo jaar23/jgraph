@@ -177,7 +177,9 @@ function updateGraph(data) {
       ...node,
       label: node.label,
       hasAnnotation: store.hasNodeAnnotation(node.id),
-      annotation: store.getNodeAnnotation(node.id)
+      annotation: store.getNodeAnnotation(node.id),
+      hasSource: node.sourceMapRef && store.hasSourceMap && store.getMethodSource(node.sourceMapRef) !== null,
+      summary: node.summary
     },
     selected: store.selectedNodes.includes(node.id)
   }))

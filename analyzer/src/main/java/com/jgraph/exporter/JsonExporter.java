@@ -43,6 +43,21 @@ public class JsonExporter {
     }
     
     /**
+     * Export analysis result and source map to JSON files
+     */
+    public void export(AnalysisResult result, com.jgraph.model.source.SourceMap sourceMap, String outputPath) throws IOException {
+        // Export main analysis
+        export(result, outputPath);
+        
+        // Export source map if it has content
+        if (sourceMap != null && !sourceMap.getMethods().isEmpty()) {
+            String sourceMapPath = outputPath.replace(".json", "-source-map.json");
+            SourceMapExporter sourceMapExporter = new SourceMapExporter();
+            sourceMapExporter.export(sourceMap, sourceMapPath);
+        }
+    }
+    
+    /**
      * Convert analysis result to JSON string
      */
     public String toJsonString(AnalysisResult result) throws IOException {

@@ -39,6 +39,12 @@ public class JavaProjectParser {
     private final DataFlowAnalyzer dataFlowAnalyzer;
     private TypeResolver typeResolver;
     
+    // Source code extraction
+    private final SourceCodeExtractor sourceCodeExtractor;
+    private final com.jgraph.model.source.SourceMap sourceMap;
+    private SourceCodeExtractor.DetailLevel sourceDetailLevel = SourceCodeExtractor.DetailLevel.STANDARD;
+    private boolean extractSource = true;
+    
     private final AnalysisResult analysisResult;
     private final Map<String, ClassOrInterfaceDeclaration> classMap = new HashMap<>();
     private final Map<String, CompilationUnit> compilationUnitMap = new HashMap<>();
@@ -57,7 +63,30 @@ public class JavaProjectParser {
         this.databaseAnalyzer = new DatabaseAnalyzer();
         this.externalCallAnalyzer = new ExternalCallAnalyzer();
         this.dataFlowAnalyzer = new DataFlowAnalyzer();
+        this.sourceCodeExtractor = new SourceCodeExtractor();
+        this.sourceMap = new com.jgraph.model.source.SourceMap();
         this.analysisResult = new AnalysisResult();
+    }
+    
+    /**
+     * Set source extraction detail level
+     */
+    public void setSourceDetailLevel(SourceCodeExtractor.DetailLevel level) {
+        this.sourceDetailLevel = level;
+    }
+    
+    /**
+     * Enable or disable source extraction
+     */
+    public void setExtractSource(boolean extractSource) {
+        this.extractSource = extractSource;
+    }
+    
+    /**
+     * Get the source map
+     */
+    public com.jgraph.model.source.SourceMap getSourceMap() {
+        return this.sourceMap;
     }
     
     /**
@@ -77,10 +106,31 @@ public class JavaProjectParser {
         ProjectInfo projectInfo = new ProjectInfo(projectDir.getName(), projectPath);
         analysisResult.setProject(projectInfo);
         
-        // Find all Java files
-        List<Path> javaFiles = findJavaFiles(path);
+        // Set source map project name and detail level
+        sourceMap.setProjectName(projectDir.getName());
+        sourceMap.setDetailLevel(sourceDetailLevel.name());
+        
+        // Detect multi-module structure
+        List<ModuleInfo> modules = MultiModuleDetector.detectModules(projectPath);
+        projectInfo.setModules(modules);
+        
+        // Set build system
+        if (!modules.isEmpty()) {
+            ModuleInfo.BuildSystem buildSystem = modules.get(0).getBuildSystem();
+            if (buildSystem != null) {
+                projectInfo.setBuildSystem(buildSystem.name());
+            }
+        }
+        
+        logger.info("Detected {} module(s)", modules.size());
+        for (ModuleInfo module : modules) {
+            logger.info("  Module: {} ({}) at {}", module.getName(), module.getType(), module.getRelativePath());
+        }
+        
+        // Find all Java files (across all modules)
+        List<Path> javaFiles = findJavaFilesInModules(path, modules);
         projectInfo.setTotalFiles(javaFiles.size());
-        logger.info("Found {} Java files", javaFiles.size());
+        logger.info("Found {} Java files across all modules", javaFiles.size());
         
         // First pass: Parse all files and build class map
         for (Path javaFile : javaFiles) {
@@ -114,6 +164,48 @@ public class JavaProjectParser {
             logger.error("Error finding Java files", e);
             return Collections.emptyList();
         }
+    }
+    
+    /**
+     * Find all .java files across multiple modules
+     */
+    private List<Path> findJavaFilesInModules(Path rootPath, List<ModuleInfo> modules) {
+        List<Path> allJavaFiles = new ArrayList<>();
+        
+        for (ModuleInfo module : modules) {
+            // Skip parent/aggregator modules that typically don't have source code
+            if (module.getType() == ModuleInfo.ModuleType.PARENT) {
+                logger.debug("Skipping parent module: {}", module.getName());
+                continue;
+            }
+            
+            Path modulePath = Paths.get(module.getPath());
+            List<String> sourceDirs = module.getSourceDirectories();
+            
+            if (sourceDirs.isEmpty()) {
+                // Fallback to scanning entire module directory
+                logger.debug("Scanning entire module directory: {}", modulePath);
+                List<Path> moduleFiles = findJavaFiles(modulePath);
+                allJavaFiles.addAll(moduleFiles);
+                module.setTotalFiles(moduleFiles.size());
+            } else {
+                // Scan specific source directories
+                int moduleFileCount = 0;
+                for (String sourceDir : sourceDirs) {
+                    Path sourcePath = modulePath.resolve(sourceDir);
+                    if (Files.exists(sourcePath) && Files.isDirectory(sourcePath)) {
+                        logger.debug("Scanning source directory: {}", sourcePath);
+                        List<Path> dirFiles = findJavaFiles(sourcePath);
+                        allJavaFiles.addAll(dirFiles);
+                        moduleFileCount += dirFiles.size();
+                    }
+                }
+                module.setTotalFiles(moduleFileCount);
+                logger.info("  Module {} has {} Java files", module.getName(), moduleFileCount);
+            }
+        }
+        
+        return allJavaFiles;
     }
     
     /**
@@ -277,6 +369,11 @@ public class JavaProjectParser {
             analysisResult.getExternalCalls().add(call);
         }
         
+        // Extract source code representation
+        if (extractSource) {
+            extractMethodSource(method, endpointId, endpoint);
+        }
+        
         return endpoint;
     }
     
@@ -391,6 +488,11 @@ public class JavaProjectParser {
         DataFlow dataFlow = convertDataFlow(dataFlowInfo, serviceId, className, filePath.toString());
         analysisResult.getDataFlows().add(dataFlow);
         
+        // Extract source code representation
+        if (extractSource) {
+            extractMethodSource(method, serviceId, serviceMethod);
+        }
+        
         return serviceMethod;
     }
     
@@ -449,6 +551,11 @@ public class JavaProjectParser {
         // Line number and file path
         method.getBegin().ifPresent(pos -> repoMethod.setLineNumber(pos.line));
         repoMethod.setFilePath(filePath.toString());
+        
+        // Extract source code representation
+        if (extractSource) {
+            extractMethodSource(method, repoId, repoMethod);
+        }
         
         return repoMethod;
     }
@@ -915,5 +1022,43 @@ public class JavaProjectParser {
         if (!method.startsWith("/")) method = "/" + method;
         
         return base + method;
+    }
+    
+    /**
+     * Extract source code representation for a method
+     */
+    private void extractMethodSource(MethodDeclaration method, String methodId, Object methodObject) {
+        try {
+            // Extract source information
+            com.jgraph.model.source.MethodSource methodSource = 
+                sourceCodeExtractor.extractMethodSource(method, methodId, sourceDetailLevel);
+            
+            // Add to source map
+            sourceMap.addMethod(methodId, methodSource);
+            
+            // Set reference and summary in the method object
+            if (methodObject instanceof Endpoint) {
+                Endpoint endpoint = (Endpoint) methodObject;
+                endpoint.setSourceMapRef(methodId);
+                endpoint.setComplexity(methodSource.getComplexity());
+                endpoint.setOperations(methodSource.getOperations());
+                endpoint.setSummary(methodSource.getSummary());
+            } else if (methodObject instanceof ServiceMethod) {
+                ServiceMethod serviceMethod = (ServiceMethod) methodObject;
+                serviceMethod.setSourceMapRef(methodId);
+                serviceMethod.setComplexity(methodSource.getComplexity());
+                serviceMethod.setOperations(methodSource.getOperations());
+                serviceMethod.setSummary(methodSource.getSummary());
+            } else if (methodObject instanceof RepositoryMethod) {
+                RepositoryMethod repoMethod = (RepositoryMethod) methodObject;
+                repoMethod.setSourceMapRef(methodId);
+                repoMethod.setComplexity(methodSource.getComplexity());
+                repoMethod.setOperations(methodSource.getOperations());
+                repoMethod.setSummary(methodSource.getSummary());
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error extracting source for method {}: {}", methodId, e.getMessage());
+        }
     }
 }

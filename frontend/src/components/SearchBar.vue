@@ -212,6 +212,14 @@
     <!-- Advanced Trace Tab (new functionality) -->
     <div v-show="activeTab === 'advanced'" class="advanced-trace-container">
       <AdvancedTraceInput @search="handleAdvancedSearch" />
+      
+      <!-- Search Notification -->
+      <div v-if="searchNotification" class="search-notification" :class="searchNotification.type">
+        <span class="notification-icon">{{ searchNotification.icon }}</span>
+        <span class="notification-message">{{ searchNotification.message }}</span>
+        <button @click="searchNotification = null" class="notification-close">×</button>
+      </div>
+      
       <SearchResults 
         v-if="advancedSearchResults" 
         :results="advancedSearchResults"
@@ -600,12 +608,24 @@ function handleAdvancedSearch(searchData) {
     // Perform search
     const results = store.performAdvancedSearch(searchData.input, searchData.filters)
     
+    console.log('[SearchBar] Search results:', results)
+    
     if (!results || !results.components || results.components.length === 0) {
-      // No results found
+      // Check if we found logs or dataflows but no components
+      const hasLogs = results && results.logs && results.logs.length > 0
+      const hasDataFlows = results && results.dataFlows && results.dataFlows.length > 0
+      
+      let message = 'No components found matching your search.'
+      if (hasLogs || hasDataFlows) {
+        message += ` Found ${results.logs?.length || 0} log(s) and ${results.dataFlows?.length || 0} dataflow(s), but they may not be connected to any components. Try a different search term or check console for details.`
+      } else {
+        message += ' Try using keywords from log messages, variable names, or adjust your search input. Check browser console for debugging info.'
+      }
+      
       searchNotification.value = {
         type: 'warning',
         icon: '⚠️',
-        message: 'No components found matching your search. Try adjusting filters or search input.'
+        message
       }
       advancedSearchResults.value = results
     } else {
@@ -629,7 +649,7 @@ function handleAdvancedSearch(searchData) {
     searchNotification.value = {
       type: 'error',
       icon: '❌',
-      message: `Search failed: ${error.message || 'Unknown error occurred'}`
+      message: `Search failed: ${error.message || 'Unknown error occurred'}. Check console for details.`
     }
     advancedSearchResults.value = null
   }

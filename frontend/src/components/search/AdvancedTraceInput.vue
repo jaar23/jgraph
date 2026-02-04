@@ -83,9 +83,9 @@ const isSearching = ref(false)
 const showAdvancedFilters = ref(false)
 const filters = ref({
   componentTypes: ['endpoint', 'service', 'repository'],
-  minCentrality: 50,
-  maxResults: 20,
-  minConfidence: 30
+  minCentrality: 0,  // Changed from 50 to 0 to show all results
+  maxResults: 50,    // Changed from 20 to 50 to show more results
+  minConfidence: 0   // Changed from 30 to 0 to show all confidence levels
 })
 
 const examples = [

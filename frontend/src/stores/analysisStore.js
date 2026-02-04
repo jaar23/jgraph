@@ -6,6 +6,7 @@ import * as centralityCalculator from '../utils/centralityCalculator'
 export const useAnalysisStore = defineStore('analysis', () => {
   // Original analysis data
   const analysisData = ref(null)
+  const sourceMapData = ref(null)
   const searchKeyword = ref('')
   const selectedNode = ref(null)
   const filteredData = ref(null)
@@ -75,6 +76,7 @@ Please provide:
 
   // Computed
   const hasData = computed(() => analysisData.value !== null)
+  const hasSourceMap = computed(() => sourceMapData.value !== null)
   
   const endpoints = computed(() => analysisData.value?.endpoints || [])
   const services = computed(() => analysisData.value?.services || [])
@@ -102,8 +104,25 @@ Please provide:
     }
   }
 
+  function loadSourceMapData(data) {
+    sourceMapData.value = data
+    console.log('Source map loaded:', {
+      methods: Object.keys(data.methods || {}).length,
+      detailLevel: data.detailLevel,
+      generatedAt: data.generatedAt
+    })
+  }
+
+  function getMethodSource(methodId) {
+    if (!sourceMapData.value || !sourceMapData.value.methods) {
+      return null
+    }
+    return sourceMapData.value.methods[methodId]
+  }
+
   function clearData() {
     analysisData.value = null
+    sourceMapData.value = null
     filteredData.value = null
     searchKeyword.value = ''
     selectedNode.value = null
@@ -256,11 +275,22 @@ Please provide:
    */
   function performAdvancedSearch(inputText, filters = {}) {
     if (!inputText || !analysisData.value) {
+      console.warn('[AdvancedSearch] No input text or analysis data')
       return null
     }
     
+    console.log('[AdvancedSearch] Starting search with input:', inputText)
+    console.log('[AdvancedSearch] Available data:', {
+      endpoints: endpoints.value?.length || 0,
+      services: services.value?.length || 0,
+      repositories: repositories.value?.length || 0,
+      logs: logStatements.value?.length || 0,
+      dataFlows: dataFlows.value?.length || 0
+    })
+    
     // Detect input type
     const inputType = searchAlgorithm.detectInputType(inputText)
+    console.log('[AdvancedSearch] Detected input type:', inputType)
     
     let matches = {
       logs: [],
@@ -271,16 +301,22 @@ Please provide:
     // Parse and search based on input type
     if (inputType === 'LOG_MESSAGE') {
       const parsed = searchAlgorithm.parseLogMessage(inputText)
+      console.log('[AdvancedSearch] Parsed log message:', parsed)
       matches.logs = searchAlgorithm.fuzzyMatchLogs(parsed, logStatements.value)
+      console.log('[AdvancedSearch] Found log matches:', matches.logs.length)
     } else if (inputType === 'VARIABLE_NAME') {
       matches.dataFlows = searchAlgorithm.findVariableInDataFlows(inputText, dataFlows.value)
+      console.log('[AdvancedSearch] Found dataflow matches:', matches.dataFlows.length)
       
       // Also search in logs for variable
       const parsed = searchAlgorithm.parseLogMessage(inputText)
       matches.logs = searchAlgorithm.fuzzyMatchLogs(parsed, logStatements.value)
+      console.log('[AdvancedSearch] Found log matches:', matches.logs.length)
     } else if (inputType === 'JSON_PAYLOAD') {
       const parsed = searchAlgorithm.parseJSON(inputText)
+      console.log('[AdvancedSearch] Parsed JSON:', parsed)
       const jsonMatches = searchAlgorithm.findJSONFieldsInComponents(parsed, analysisData.value)
+      console.log('[AdvancedSearch] Found JSON matches:', jsonMatches)
       
       // Combine JSON matches into components
       matches.components = [
@@ -290,12 +326,38 @@ Please provide:
     } else {
       // FREE_TEXT - search everywhere
       const parsed = searchAlgorithm.parseLogMessage(inputText)
+      console.log('[AdvancedSearch] Parsed free text:', parsed)
       matches.logs = searchAlgorithm.fuzzyMatchLogs(parsed, logStatements.value)
       matches.dataFlows = searchAlgorithm.findVariableInDataFlows(inputText, dataFlows.value)
+      console.log('[AdvancedSearch] Found matches - logs:', matches.logs.length, 'dataFlows:', matches.dataFlows.length)
     }
     
     // Build component graph from matches
     const componentGraph = searchAlgorithm.buildComponentGraph(matches, analysisData.value)
+    console.log('[AdvancedSearch] Built component graph:', componentGraph.length, 'components')
+    
+    // If no components found, return early with detailed info
+    if (componentGraph.length === 0) {
+      console.warn('[AdvancedSearch] No components found in graph')
+      return {
+        inputType,
+        summary: {
+          totalComponents: 0,
+          totalLogs: matches.logs.length,
+          totalDataFlows: matches.dataFlows.length,
+          totalDatabaseOps: 0,
+          totalExternalCalls: 0,
+          totalExceptions: 0,
+          averageCentrality: 0,
+          highConfidenceMatches: 0,
+          matchTypes: []
+        },
+        components: [],
+        logs: matches.logs,
+        dataFlows: matches.dataFlows,
+        confidence: { level: 'LOW', percentage: 0 }
+      }
+    }
     
     // Calculate centrality scores
     const centralityScores = centralityCalculator.calculateCentrality(
@@ -305,24 +367,30 @@ Please provide:
     
     // Rank components
     const rankedComponents = centralityCalculator.rankComponents(componentGraph, centralityScores)
+    console.log('[AdvancedSearch] Ranked components:', rankedComponents.length)
     
     // Apply filters
     let filteredComponents = rankedComponents
     
     if (filters.minCentrality) {
+      const beforeFilter = filteredComponents.length
       filteredComponents = filteredComponents.filter(c => 
         c.combinedScore >= filters.minCentrality
       )
+      console.log('[AdvancedSearch] Filtered by minCentrality:', beforeFilter, '->', filteredComponents.length)
     }
     
     if (filters.componentTypes && filters.componentTypes.length > 0) {
+      const beforeFilter = filteredComponents.length
       filteredComponents = filteredComponents.filter(c => 
         filters.componentTypes.includes(c.type)
       )
+      console.log('[AdvancedSearch] Filtered by types:', beforeFilter, '->', filteredComponents.length)
     }
     
     if (filters.maxResults) {
       filteredComponents = filteredComponents.slice(0, filters.maxResults)
+      console.log('[AdvancedSearch] Limited to maxResults:', filteredComponents.length)
     }
     
     // Build summary
@@ -332,7 +400,7 @@ Please provide:
       dataFlows: matches.dataFlows
     })
     
-    return {
+    const result = {
       inputType,
       summary,
       components: filteredComponents,
@@ -342,6 +410,9 @@ Please provide:
         summary.averageCentrality
       )
     }
+    
+    console.log('[AdvancedSearch] Final result:', result)
+    return result
   }
   
   /**
@@ -790,6 +861,7 @@ Please provide:
   return {
     // State
     analysisData,
+    sourceMapData,
     searchKeyword,
     selectedNode,
     filteredData,
@@ -805,6 +877,7 @@ Please provide:
     
     // Computed
     hasData,
+    hasSourceMap,
     endpoints,
     services,
     repositories,
@@ -821,6 +894,8 @@ Please provide:
     
     // Actions
     loadAnalysisData,
+    loadSourceMapData,
+    getMethodSource,
     clearData,
     setSearchKeyword,
     setSelectedNode,

@@ -161,7 +161,12 @@ function calculateSimilarity(str1, str2) {
  * Fuzzy match logs based on keywords
  */
 export function fuzzyMatchLogs(parsedInput, logs) {
-  if (!parsedInput || !logs) return []
+  if (!parsedInput || !logs) {
+    console.log('[fuzzyMatchLogs] No input or logs provided')
+    return []
+  }
+  
+  console.log('[fuzzyMatchLogs] Searching', logs.length, 'logs with keywords:', parsedInput.keywords)
   
   const matches = []
   
@@ -172,7 +177,7 @@ export function fuzzyMatchLogs(parsedInput, logs) {
     // Exact message match
     if (log.message && parsedInput.original) {
       const similarity = calculateSimilarity(log.message, parsedInput.original)
-      if (similarity >= 80) {
+      if (similarity >= 60) {  // Lowered from 80 to be less strict
         score += similarity
         reasons.push(`Message similarity: ${similarity}%`)
       }
@@ -188,7 +193,7 @@ export function fuzzyMatchLogs(parsedInput, logs) {
       if (matchedKeywords.length > 0) {
         const keywordScore = (matchedKeywords.length / parsedInput.keywords.length) * 80
         score += keywordScore
-        reasons.push(`Matched ${matchedKeywords.length}/${parsedInput.keywords.length} keywords`)
+        reasons.push(`Matched ${matchedKeywords.length}/${parsedInput.keywords.length} keywords: ${matchedKeywords.join(', ')}`)
       }
     }
     
@@ -205,6 +210,21 @@ export function fuzzyMatchLogs(parsedInput, logs) {
       }
     }
     
+    // Partial message matching (new - more lenient)
+    if (score === 0 && parsedInput.keywords && parsedInput.keywords.length > 0) {
+      const logText = (log.message || '').toLowerCase()
+      const partialMatches = parsedInput.keywords.filter(kw => {
+        // Check if any word in the log contains the keyword
+        const logWords = logText.split(/\s+/)
+        return logWords.some(word => word.includes(kw.toLowerCase()) || kw.toLowerCase().includes(word))
+      })
+      
+      if (partialMatches.length > 0) {
+        score += (partialMatches.length / parsedInput.keywords.length) * 40
+        reasons.push(`Partial matches: ${partialMatches.join(', ')}`)
+      }
+    }
+    
     if (score > 0) {
       matches.push({
         log,
@@ -215,6 +235,11 @@ export function fuzzyMatchLogs(parsedInput, logs) {
     }
   })
   
+  console.log('[fuzzyMatchLogs] Found', matches.length, 'matches')
+  if (matches.length > 0) {
+    console.log('[fuzzyMatchLogs] Top match:', matches[0])
+  }
+  
   // Sort by score descending
   return matches.sort((a, b) => b.score - a.score)
 }
@@ -223,7 +248,12 @@ export function fuzzyMatchLogs(parsedInput, logs) {
  * Find variable usage in dataflows
  */
 export function findVariableInDataFlows(varName, dataFlows) {
-  if (!varName || !dataFlows) return []
+  if (!varName || !dataFlows) {
+    console.log('[findVariableInDataFlows] No variable name or dataflows provided')
+    return []
+  }
+  
+  console.log('[findVariableInDataFlows] Searching', dataFlows.length, 'dataflows for variable:', varName)
   
   const matches = []
   const lowerVarName = varName.toLowerCase()
@@ -296,6 +326,11 @@ export function findVariableInDataFlows(varName, dataFlows) {
       })
     }
   })
+  
+  console.log('[findVariableInDataFlows] Found', matches.length, 'matches')
+  if (matches.length > 0) {
+    console.log('[findVariableInDataFlows] Top match:', matches[0])
+  }
   
   return matches.sort((a, b) => b.score - a.score)
 }

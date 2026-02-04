@@ -2,6 +2,8 @@ package com.jgraph.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Project metadata
@@ -22,6 +24,18 @@ public class ProjectInfo {
     
     @JsonProperty("javaVersion")
     private String javaVersion;
+    
+    @JsonProperty("isMultiModule")
+    private boolean isMultiModule = false;
+    
+    @JsonProperty("buildSystem")
+    private String buildSystem;
+    
+    @JsonProperty("modules")
+    private List<ModuleInfo> modules = new ArrayList<>();
+    
+    @JsonProperty("totalModules")
+    private int totalModules;
     
     public ProjectInfo() {
         this.analyzedAt = Instant.now().toString();
@@ -72,5 +86,45 @@ public class ProjectInfo {
     
     public void setJavaVersion(String javaVersion) {
         this.javaVersion = javaVersion;
+    }
+    
+    public boolean isMultiModule() {
+        return isMultiModule;
+    }
+    
+    public void setMultiModule(boolean multiModule) {
+        isMultiModule = multiModule;
+    }
+    
+    public String getBuildSystem() {
+        return buildSystem;
+    }
+    
+    public void setBuildSystem(String buildSystem) {
+        this.buildSystem = buildSystem;
+    }
+    
+    public List<ModuleInfo> getModules() {
+        return modules;
+    }
+    
+    public void setModules(List<ModuleInfo> modules) {
+        this.modules = modules;
+        this.totalModules = modules.size();
+        this.isMultiModule = modules.size() > 1;
+    }
+    
+    public int getTotalModules() {
+        return totalModules;
+    }
+    
+    public void setTotalModules(int totalModules) {
+        this.totalModules = totalModules;
+    }
+    
+    public void addModule(ModuleInfo module) {
+        this.modules.add(module);
+        this.totalModules = this.modules.size();
+        this.isMultiModule = this.modules.size() > 1;
     }
 }

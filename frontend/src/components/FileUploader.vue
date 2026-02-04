@@ -27,6 +27,7 @@
           <ol>
             <li>Run the JGraph analyzer on your Java project</li>
             <li>Upload the generated analysis.json file</li>
+            <li>Optionally upload the analysis-source-map.json for detailed source code insights</li>
             <li>Explore your project's architecture visually</li>
           </ol>
         </div>
@@ -38,11 +39,43 @@
         <div class="project-title">
           <strong>{{ store.analysisData.project.name }}</strong>
           <span class="project-path">{{ store.analysisData.project.path }}</span>
+          <div v-if="store.hasSourceMap" class="source-map-status">
+            ✅ Source map loaded ({{ Object.keys(store.sourceMapData.methods).length }} methods)
+          </div>
+          <div v-else class="source-map-status no-source">
+            ℹ️ No source map loaded
+          </div>
         </div>
         <div class="compact-stats">
           <span class="stat-item">{{ store.statistics.totalEndpoints }} endpoints</span>
           <span class="stat-item">{{ store.statistics.totalServices }} services</span>
           <span class="stat-item">{{ store.statistics.totalRepositories }} repos</span>
+          
+          <!-- Source map upload button -->
+          <input
+            ref="sourceMapInput"
+            type="file"
+            accept=".json"
+            @change="handleSourceMapUpload"
+            class="file-input"
+          />
+          <button 
+            v-if="!store.hasSourceMap" 
+            @click="triggerSourceMapInput" 
+            class="source-map-btn"
+            title="Upload source map file for detailed code insights"
+          >
+            📄 Upload Source Map
+          </button>
+          <button 
+            v-else 
+            @click="removeSourceMap" 
+            class="remove-source-btn"
+            title="Remove source map"
+          >
+            ✕ Remove Source Map
+          </button>
+          
           <button @click="store.clearData()" class="reload-btn-compact">
             Change File
           </button>
@@ -58,10 +91,19 @@ import { useAnalysisStore } from '../stores/analysisStore'
 
 const store = useAnalysisStore()
 const fileInput = ref(null)
+const sourceMapInput = ref(null)
 const error = ref('')
 
 function triggerFileInput() {
   fileInput.value?.click()
+}
+
+function triggerSourceMapInput() {
+  sourceMapInput.value?.click()
+}
+
+function removeSourceMap() {
+  store.sourceMapData = null
 }
 
 function handleFileUpload(event) {
@@ -81,6 +123,27 @@ function handleFileUpload(event) {
       }
 
       store.loadAnalysisData(json)
+      
+      // Try to load source map file (same name with -source-map suffix)
+      const fileName = file.name
+      const sourceMapName = fileName.replace(/\.json$/, '-source-map.json')
+      
+      // Create a new file input to look for source map
+      const sourceMapInput = document.createElement('input')
+      sourceMapInput.type = 'file'
+      sourceMapInput.accept = '.json'
+      
+      // Try to automatically load source map from FileList if available
+      const fileList = event.target.files
+      for (let i = 0; i < fileList.length; i++) {
+        if (fileList[i].name === sourceMapName) {
+          loadSourceMapFile(fileList[i])
+          break
+        }
+      }
+      
+      // If not found, try to fetch it from the same location
+      tryFetchSourceMap(fileName, sourceMapName)
     } catch (err) {
       error.value = 'Error parsing JSON file: ' + err.message
       console.error('Parse error:', err)
@@ -92,6 +155,41 @@ function handleFileUpload(event) {
   }
 
   reader.readAsText(file)
+}
+
+function loadSourceMapFile(file) {
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const json = JSON.parse(e.target.result)
+      
+      // Validate source map structure
+      if (!json.methods || !json.version) {
+        console.warn('Invalid source map format, skipping')
+        return
+      }
+
+      store.loadSourceMapData(json)
+      console.log('Source map loaded successfully')
+    } catch (err) {
+      console.warn('Error parsing source map file:', err)
+    }
+  }
+  
+  reader.readAsText(file)
+}
+
+function tryFetchSourceMap(analysisFileName, sourceMapName) {
+  // This won't work for local files but might work if served from a server
+  // Just log for now, user can manually select source map file later
+  console.log('To enable source code details, upload the source map file:', sourceMapName)
+}
+
+function handleSourceMapUpload(event) {
+  const file = event.target.files[0]
+  if (!file) return
+
+  loadSourceMapFile(file)
 }
 </script>
 

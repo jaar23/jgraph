@@ -124,6 +124,17 @@
         </div>
       </div>
 
+      <!-- Source Code Details -->
+      <div v-if="methodSource" class="detail-section source-detail-section">
+        <h4>📄 Source Code Details</h4>
+        <MethodSourcePanel :methodSource="methodSource" />
+      </div>
+      <div v-else-if="store.hasData && !store.hasSourceMap" class="detail-section">
+        <div class="source-map-hint">
+          <p>💡 Upload the source map file to see detailed code analysis</p>
+        </div>
+      </div>
+
       <!-- Javadoc if available -->
       <div v-if="node.javadoc" class="detail-section">
         <h4>Documentation</h4>
@@ -141,9 +152,15 @@
 import { ref, computed, watch } from 'vue'
 import { useAnalysisStore } from '../stores/analysisStore'
 import { marked } from 'marked'
+import MethodSourcePanel from './MethodSourcePanel.vue'
 
 const store = useAnalysisStore()
 const node = computed(() => store.selectedNode)
+
+const methodSource = computed(() => {
+  if (!node.value || !node.value.sourceMapRef) return null
+  return store.getMethodSource(node.value.sourceMapRef)
+})
 
 const showAddAnnotation = ref(false)
 const newAnnotation = ref({
@@ -557,13 +574,35 @@ watch(node, () => {
 }
 
 .javadoc {
-  background-color: #f8f9fa;
-  padding: 0.75rem;
-  border-radius: 4px;
-  white-space: pre-wrap;
   font-size: 0.875rem;
   line-height: 1.6;
   color: #555;
+}
+
+.source-detail-section {
+  background: #f5f7fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+}
+
+.source-detail-section h4 {
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #3498db;
+}
+
+.source-map-hint {
+  padding: 1rem;
+  background: #fff3cd;
+  border-left: 4px solid #ffc107;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+}
+
+.source-map-hint p {
+  margin: 0;
+  color: #856404;
+  font-size: 0.9rem;
 }
 
 .no-selection {
